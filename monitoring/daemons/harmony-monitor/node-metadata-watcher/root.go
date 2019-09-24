@@ -36,11 +36,13 @@ var (
 			cmd.Help()
 		},
 	}
+	w               *cobraSrvWrapper = &cobraSrvWrapper{nil}
 	monitorNodeYAML string
 	stdlog          *log.Logger
 	errlog          *log.Logger
-	//    dependencies that are NOT required by the service, but might be used
-	dependencies = []string{"dummy.service"}
+	// Add services here that we might want to depend on, see all services on
+	// the machine with systemctl list-unit-files
+	dependencies = []string{}
 )
 
 // Service has embedded daemon
@@ -52,7 +54,7 @@ type Service struct {
 
 // Manage by daemon commands or run the daemon
 func (service *Service) Manage() error {
-	a, installE := service.Install()
+	a, installE := service.Install("service", "start")
 	if installE != nil {
 		return installE
 	}
@@ -205,6 +207,28 @@ func parseVersionS(v string) string {
 	return chopped[versionSpot]
 }
 
+func (cw *cobraSrvWrapper) preRunInit(cmd *cobra.Command, args []string) error {
+	srv, err := daemon.New(name, description, dependencies...)
+	if err != nil {
+		return err
+	}
+	cw.Service = &Service{srv, nil, nil}
+	// m := &monitor{chain: instr.TargetChain}
+	// cW.Service = &Service{srv, nil, nil}
+	// err = service.Manage()
+
+	return nil
+}
+
+func (cw *cobraSrvWrapper) start(cmd *cobra.Command, args []string) error {
+	r, err := cw.Start()
+	if err != nil {
+		return err
+	}
+	fmt.Println(r)
+	return nil
+}
+
 func init() {
 	stdlog = log.New(os.Stdout, "", log.Ldate|log.Ltime)
 	errlog = log.New(os.Stderr, "", log.Ldate|log.Ltime)
@@ -216,32 +240,39 @@ func init() {
 			os.Exit(0)
 		},
 	})
-
-	monitor := &cobra.Command{
-		Use:   "monitor",
-		Short: "watch the blockchain for problems",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			instr, err := newInstructions(monitorNodeYAML)
-			if err != nil {
-				return err
-			}
-			srv, err := daemon.New(name, description, dependencies...)
-			if err != nil {
-				return err
-			}
-			m := &monitor{chain: instr.TargetChain}
-			service := &Service{srv, m, instr}
-			err = service.Manage()
-			if err != nil {
-				return err
-			}
-			return nil
+	daemonCmd := &cobra.Command{
+		Use:               "service",
+		Short:             "Control the daemon functionality of harmony-watchdog",
+		PersistentPreRunE: w.preRunInit,
+		Run: func(cmd *cobra.Command, args []string) {
+			cmd.Help()
 		},
 	}
+	daemonCmd.AddCommand(daemonCmds()...)
+	rootCmd.AddCommand(daemonCmd)
 
-	rootCmd.AddCommand(monitor)
-	descr := "yaml detailing what to watch"
-	monitor.Flags().StringVar(&monitorNodeYAML, "watch", "", descr)
-	monitor.MarkFlagRequired("watch")
+	// monitor := &cobra.Command{
+	// 	Use:   "monitor",
+	// 	Short: "watch the blockchain for problems",
+	// 	RunE: func(cmd *cobra.Command, args []string) error {
+	// instr, err := newInstructions(monitorNodeYAML)
+	// if err != nil {
+	// 	return err
+	// }
+	// srv, err := daemon.New(name, description, dependencies...)
+	// if err != nil {
+	// 	return err
+	// }
+	// m := &monitor{chain: instr.TargetChain}
+	// service := &Service{srv, m, instr}
+	// err = service.Manage()
+	// if err != nil {
+	// 	return err
+	// }
+	// 		return nil
+	// 	},
+	// }
+
+	// rootCmd.AddCommand(monitor)
 
 }
