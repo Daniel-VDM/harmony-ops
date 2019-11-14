@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+
+	"github.com/pkg/profile"
 )
 
 var (
@@ -13,6 +15,8 @@ var (
 )
 
 func main() {
+	// Use profile.NoShutdownHook to ignore system interrupt
+	defer profile.Start().Stop()
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(-1)
