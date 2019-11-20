@@ -161,14 +161,14 @@ func (service *Service) monitorNetwork() error {
 	// by system signal
 	for {
 		select {
-		case killSignal := <-interrupt:
-			stdlog.Println("Got signal:", killSignal)
-			stdlog.Println("Stoping listening on ", listener.Addr())
-			listener.Close()
-			if killSignal == os.Interrupt {
-				return errSysIntrpt
-			}
-			return errDaemonKilled
+		// case killSignal := <-interrupt:
+		// 	stdlog.Println("Got signal:", killSignal)
+		// 	stdlog.Println("Stoping listening on ", listener.Addr())
+		// 	listener.Close()
+		// 	if killSignal == os.Interrupt {
+		// 		return errSysIntrpt
+		// 	}
+		// 	return errDaemonKilled
 		}
 	}
 	return nil
@@ -257,7 +257,7 @@ func newInstructions(yamlPath string) (*instruction, error) {
 		defer f.Close()
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
-		 	ipList = append(ipList, scanner.Text()+":"+strconv.Itoa(t.Network.RPCPort))
+			ipList = append(ipList, scanner.Text()+":"+strconv.Itoa(t.Network.RPCPort))
 		}
 		err = scanner.Err()
 		if err != nil {
