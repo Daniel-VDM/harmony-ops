@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 import argparse
-import json
 import os
+import inspect
 import random
-import re
-import subprocess
 import shutil
 import sys
 import time
 
 import pyhmy
-import requests
+
+from utils import *
 
 ACC_NAMES_ADDED = []
 ACC_NAME_PREFIX = "_Test_key_"
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args():
     parser = argparse.ArgumentParser(description='Wrapper python script to test API using newman.')
     parser.add_argument("--test_dir", dest="test_dir", default="./tests/default",
                         help="Path to test directory. Default is './tests/default'", type=str)
@@ -55,74 +54,89 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def get_balance(name, node) -> dict:
+def get_balance(name, node):
     address = CLI.get_address(name)
-    if not address:
-        return {}
-    response = CLI.single_call(f"hmy balances {address} --node={node}").replace("\r", "").replace("\n", "")
-    return json.loads(response)
+    return json.loads(CLI.single_call(f"hmy --node={node} balances {address}")) if address else []
 
 
-def load_keys() -> None:
-    print("Loading keys...")
-    random_num = random.randint(-1e9, 1e9)
+def add_key(name):
+    proc = CLI.expect_call(f"hmy keys add {name} --use-own-passphrase")
+    proc.expect("Enter passphrase:\r\n")
+    proc.sendline(f"{args.passphrase}")
+    proc.expect("Repeat the passphrase:\r\n")
+    proc.sendline(f"{args.passphrase}")
+    proc.wait()
+    ACC_NAMES_ADDED.append(name)
+
+
+def bls_generator(count, key_dir="/tmp", filter_fn=None):
+    assert os.path.isabs(key_dir)
+    if filter_fn is not None:
+        assert callable(filter_fn)
+        assert len(inspect.signature(filter_fn).parameters) == 1, "filter function must have 1 argument"
+
+    for i in range(count):
+        while True:
+            proc = CLI.expect_call(f"hmy keys generate-bls-key --bls-file-path {key_dir}/{ACC_NAME_PREFIX}bls{i}.key",
+                                   timeout=3)
+            proc.expect("Enter passphrase:\r\n")
+            proc.sendline(f"{args.passphrase}")
+            proc.expect("Repeat the passphrase:\r\n")
+            proc.sendline(f"{args.passphrase}")
+            bls_key = json.loads(proc.read().decode().strip())
+            if filter_fn is None or filter_fn(bls_key):
+                break
+        yield bls_key
+
+
+@announce
+def load_keys():
+    """
+    Makes strong assumption that keyfile ends with '.key' or '--' (for CLI generated keystore files).
+    """
     key_paths = os.listdir(args.keys_dir)
     for i, key in enumerate(key_paths):
         if not os.path.isdir(f"{args.keys_dir}/{key}"):
             continue
         key_content = os.listdir(f"{args.keys_dir}/{key}")
-        account_name = f"{ACC_NAME_PREFIX}{random_num}_{i}"
+        account_name = f"{ACC_NAME_PREFIX}funding_{i}"
         CLI.remove_account(account_name)
         for file_name in key_content:
-            if not file_name.endswith(".key"):  # Strong assumption about key file, some valid files may be ignored.
+            if not file_name.endswith(".key") and not file_name.endswith("--"):
                 continue
             from_key_file_path = f"{os.path.abspath(args.keys_dir)}/{key}/{file_name}"
             to_key_file_path = f"{CLI.keystore_path}/{account_name}"
             if not os.path.isdir(to_key_file_path):
                 os.mkdir(to_key_file_path)
             shutil.copy(from_key_file_path, to_key_file_path)
-            try:
-                address = CLI.get_address(account_name)
-                names_with_address = CLI.get_accounts(address)
-                if len(names_with_address) > 1:  # Remove duplicate accounts as passphrase may fail.
-                    for name in names_with_address:
-                        if not name.startswith(ACC_NAME_PREFIX):
-                            print(f"[!] Removing {name} ({address}) from keystore as it conflicts with imported key")
-                            CLI.remove_account(name)
-            except AttributeError:
-                print("[!] pyhmy is out of date. Upgrade with:\n\t python3 -m pip install pyhmy --upgrade\n")
             ACC_NAMES_ADDED.append(account_name)
     assert len(ACC_NAMES_ADDED) > 1, "Must load at least 2 keys and must match CLI's keystore format"
 
 
-def is_after_epoch(n):
-    url = args.hmy_endpoint_src
-    payload = """{
-        "jsonrpc": "2.0",
-        "method": "hmy_latestHeader",
-        "params": [  ],
-        "id": 1
-    }"""
-    headers = {
-        'Content-Type': 'application/json'
-    }
-    try:
-        response = requests.request('POST', url, headers=headers, data=payload, allow_redirects=False, timeout=3)
-        body = json.loads(response.content)
-        return int(body["result"]["epoch"]) > n
-    except (requests.ConnectionError, KeyError):
-        return False
+@announce
+def fund_account(from_account_name, to_account_name, amount):
+    """
+    Assumes from_account has funds on shard 0.
+    Assumes from_account has been imported with default passphrase.
+    """
+    from_address = CLI.get_address(from_account_name)
+    to_address = CLI.get_address(to_account_name)
+    CLI.single_call(f"hmy --node={args.hmy_endpoint_src} transfer --from {from_address} --to {to_address} "
+                    f"--from-shard 0 --to-shard 0 --amount {amount} --chain-id {args.chain_id} "
+                    f"--passphrase={args.passphrase} --wait-for-confirm=45", timeout=40)
+    print(f"{COLOR.OKGREEN}Balances for {to_account_name} ({to_address}):{COLOR.ENDC}")
+    print(f"{json.dumps(get_balance(to_account_name, args.hmy_endpoint_src), indent=4)}\n")
 
 
-def create_validator() -> list:
-    print("== Creating validators ==")
-
-    bls_keys_for_new_val = [
-        "1480fca328daaddd3487195c5500969ecccbb806b6bf464734e0e3ad18c64badfae8578d76e2e9281b6a3645d056960a",
-        "9d657b1854d6477dba8bca9606f6ac884df308558f2b3b545fc76a9ef02abc87d3518cf1134d21acf03036cea2820f02",
-        "e2c13c84c8f2396cf7180d5026e048e59ec770a2851003f1f2ab764a79c07463681ed7ddfe62bc4d440526a270891c86",
-    ]
-
+@test
+def create_validator():
+    """
+    Returns a dictionary of added validators where key = addr and value = dictionary of associated test data.
+    """
+    # new_val_count = 3
+    new_val_count = 1
+    amount = 3  # Must be > 1 b/c of min-self-delegation
+    added_validators = {}
     # Sourced from harmony/test/config/local-resharding.txt (Keys must be in provided keystore).
     foundational_node_data = [
         ("one1ghkz3frhske7emk79p7v2afmj4a5t0kmjyt4s5",
@@ -147,57 +161,180 @@ def create_validator() -> list:
          "16513c487a6bb76f37219f3c2927a4f281f9dd3fd6ed2e3a64e500de6545cf391dd973cc228d24f9bd01efe94912e714")
     ]
 
-    added_validators = []
+    funding_account_name = None
+    min_funding_acc_funds = new_val_count * amount + (new_val_count * 1)  # +1/new_acc for gas overhead.
+    for candidate_acc_names in ACC_NAMES_ADDED:
+        if float(get_balance(candidate_acc_names, args.hmy_endpoint_src)[0]["amount"]) > min_funding_acc_funds:
+            funding_account_name = candidate_acc_names
+            break
+    assert funding_account_name is not None, "Imported keys don't have enough funds for the test"
 
-    while not is_after_epoch(0):
+    while not is_after_epoch(0, args.hmy_endpoint_src):
         print("Waiting for epoch 1...")
         time.sleep(5)
 
-    for key in bls_keys_for_new_val:
-        account_name = f"{ACC_NAME_PREFIX}{random.randint(-1e6, 1e6)}"
-        proc = CLI.expect_call(f"hmy keys add {account_name} --passphrase")
-        proc.expect("Enter passphrase\r\n")
-        proc.sendline(f"{args.passphrase}")
-        proc.expect("Repeat the passphrase:\r\n")
-        proc.sendline(f"{args.passphrase}")
-        proc.wait()
-        address = CLI.get_address(account_name)
-        added_validators.append(address)
-        staking_command = f"hmy staking create-validator --amount 1 " \
-                          f"--validator-addr {address} " \
-                          f"--bls-pubkeys {key} --identity foo --details bar --name baz " \
-                          f"--max-change-rate 0.1 --max-rate 0.2 --max-total-delegation 10 " \
-                          f"--min-self-delegation 1 --rate 0.1 --security-contact Leo  " \
-                          f"--website harmony.one --passphrase={args.passphrase}"
-        ACC_NAMES_ADDED.append(account_name)
-        print(f"Staking command response for {address}: ", CLI.single_call(staking_command))
+    for i, bls_key in enumerate(bls_generator(new_val_count)):
+        val_name = f"{ACC_NAME_PREFIX}validator{i}"
+        CLI.remove_account(val_name)
+        add_key(val_name)
+        val_address = CLI.get_address(val_name)
+        fund_account(funding_account_name, val_name, amount + 1)  # +1 for gas overhead.
 
-    for address, key in foundational_node_data:
-        added_validators.append(address)
-        staking_command = f"hmy staking create-validator --amount 1 " \
-                          f"--validator-addr {address} " \
-                          f"--bls-pubkeys {key} --identity foo --details bar --name baz " \
-                          f"--max-change-rate 0.1 --max-rate 0.2 --max-total-delegation 10 " \
-                          f"--min-self-delegation 1 --rate 0.1 --security-contact Leo  " \
-                          f"--website harmony.one --passphrase={args.passphrase}"
-        print(f"Staking command response for {address}: ", CLI.single_call(staking_command))
+        rates = random.uniform(0, 1), random.uniform(0, 1)
+        rate, max_rate = min(rates), max(rates)
+        max_change_rate = random.uniform(0, 1)
+        max_total_delegation = random.randint(amount, 100)
+        proc = CLI.expect_call(f"hmy --node={args.hmy_endpoint_src} staking create-validator "
+                               f"--validator-addr {val_address} --name {val_name} "
+                               f"--identity test_account --website harmony.one "
+                               f"--security-contact Daniel-VDM --details none --rate {rate} --max-rate {max_rate} "
+                               f"--max-change-rate {max_change_rate} --min-self-delegation 1 "
+                               f"--max-total-delegation {max_total_delegation} "
+                               f"--amount {amount} --bls-pubkeys {bls_key['public-key']} "
+                               f"--chain-id {args.chain_id} --passphrase={args.passphrase}")
+        proc.expect("Enter the absolute path to the encrypted bls private key file:\r\n")
+        proc.sendline(bls_key["encrypted-private-key-path"])
+        proc.expect("Enter the bls passphrase:\r\n")
+        proc.sendline(f"{args.passphrase}")
+        txn = json.loads(proc.read().decode())
+        print(f"{COLOR.OKGREEN}Created validator {val_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
+        data = {
+            "pub-bls-key": bls_key['public-key'],
+            "time-created": datetime.datetime.utcnow(),
+            "rate": rate,
+            "max-rate": max_rate,
+            "max_change_rate": max_change_rate,
+            "max_total_delegation": max_total_delegation
+        }
+        added_validators[val_address] = data
 
-    print("Validators added: ", added_validators)
+    gopath = get_gopath()
+    for val_address, key in foundational_node_data:
+        val_names = CLI.get_accounts(val_address)
+        if val_names and float(get_balance(val_names[0], args.hmy_endpoint_src)[0]["amount"]) < amount + 1:
+            key_path = f"{gopath}/src/github.com/harmony-one/harmony/.hmy/{key}.key"
+            assert os.path.isfile(key_path)
+            rates = random.uniform(0, 1), random.uniform(0, 1)
+            rate, max_rate = min(rates), max(rates)
+            max_change_rate = random.uniform(0, 1)
+            max_total_delegation = random.randint(amount, 100)
+            proc = CLI.expect_call(f"hmy --node={args.hmy_endpoint_src} staking create-validator "
+                                   f"--validator-addr {val_address} --name {val_names[0]} "
+                                   f"--identity test_account --website harmony.one "
+                                   f"--security-contact Daniel-VDM --details none --rate {rate} --max-rate {max_rate} "
+                                   f"--max-change-rate {max_change_rate} --min-self-delegation 1 "
+                                   f"--max-total-delegation {max_total_delegation} "
+                                   f"--amount {amount} --bls-pubkeys {key} "
+                                   f"--chain-id {args.chain_id} --passphrase={args.passphrase}")
+            proc.expect("Enter the absolute path to the encrypted bls private key file:\r\n")
+            proc.sendline(key_path)
+            proc.expect("Enter the bls passphrase:\r\n")
+            proc.sendline("")  # hardcoded passphrase for these bls keys.
+            txn = json.loads(proc.read().decode())
+            print(f"{COLOR.OKGREEN}Created validator {val_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
+            data = {
+                "pub-bls-key": key,
+                "time-created": datetime.datetime.utcnow(),
+                "rate": rate,
+                "max-rate": max_rate,
+                "max_change_rate": max_change_rate,
+                "max_total_delegation": max_total_delegation
+            }
+            added_validators[val_address] = data
+
     return added_validators
 
-def bls_generator(count):
-    for _ in range(count):
-        proc = CLI.expect_call("hmy keys generate-bls-key --bls-file-path /tmp/file.key")
-        proc.expect("Enter passphrase\r\n")
-        proc.sendline("")
-        proc.expect("Repeat the passphrase:\r\n")
-        proc.sendline("")
-        response = proc.read().decode().strip().replace('\r', '').replace('\n', '')
-        yield json.loads(response)
+
+@test
+def check_validators(added_validators):
+    for address, data in added_validators:
+        # TODO parse all validators and check them.
+        print(f"{COLOR.HEADER}Validator address: {v_addr}{COLOR.ENDC}\n")
+        response = json.loads(CLI.single_call(f"hmy --node={args.hmy_endpoint_src} blockchain validator all"))
+        print(f"{COLOR.OKGREEN}Current validators:{COLOR.ENDC}\n{json.dumps(response, indent=4)}\n")
+        if v_addr not in response["result"]:
+            print(f"Validator ({v_addr}) is not on blockchain.")
+            return False
+
+    response = json.loads(CLI.single_call(f"hmy --node={args.hmy_endpoint_src} "
+                                          f"blockchain validator information {v_addr}"))
+    print(f"{COLOR.OKGREEN}Validator ({v_addr}) information:{COLOR.ENDC}\n{json.dumps(response, indent=4)}\n")
+    # TODO: check if information matches the create-validator command.
+    return True
 
 
+@test
+def create_delegator(val_address):
+    account_name = f"{ACC_NAME_PREFIX}delegator"
+    add_key(account_name)
+    delegator_address = CLI.get_address(account_name)
+    funding_account_name = None
+    for candidate_acc_names in ACC_NAMES_ADDED:
+        if float(get_balance(candidate_acc_names, args.hmy_endpoint_src)[0]["amount"]) > 3:  # 2 + 1 for gas overhead.
+            funding_account_name = candidate_acc_names
+            break
+    assert funding_account_name is not None, "Imported keys don't have enough funds for the test"
+    fund_account(funding_account_name, account_name, 2)  # 1 + 1 for gas overhead.
+
+    staking_command = f"hmy staking delegate --validator-addr {val_address} " \
+                      f"--delegator-addr {delegator_address} --amount 1 " \
+                      f"--node={args.hmy_endpoint_src} " \
+                      f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
+    response = CLI.single_call(staking_command)
+    print(f"\tDelegator transaction response: {response}")
+
+    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
+    time.sleep(args.txn_delay)
+
+    return delegator_address
+
+
+@test
+def undelegate(v_address, d_address):
+    staking_command = f"hmy staking undelegate --validator-addr {v_address} " \
+                      f"--delegator-addr {d_address} --amount 1 " \
+                      f"--node={args.hmy_endpoint_src} " \
+                      f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
+    response = CLI.single_call(staking_command)
+    print(f"\tUndelegate transaction response: {response}")
+
+    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
+    time.sleep(args.txn_delay)
+    return True
+
+
+@test
+def collect_rewards(address):
+    print("== Collecting Rewards ==")
+    staking_command = f"hmy staking collect-rewards --delegator-addr {address} " \
+                      f"--node={args.hmy_endpoint_src} " \
+                      f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
+    response = CLI.single_call(staking_command)
+    print(f"\tCollect rewards transaction response: {response}")
+
+    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
+    time.sleep(args.txn_delay)
+    return True
+
+
+@test
+def get_delegator_info(v_addr, d_addr):
+    print("== Getting Delegator Info by Delegator ==")
+    staking_command = f"hmy blockchain delegation by-delegator {d_addr} " \
+                      f"--node={args.hmy_endpoint_src}"
+    response = CLI.single_call(staking_command)
+    print(f"\tDelegator info transaction response: {response} ")
+
+    print("== Getting Delegator Info by Validator ==")
+    staking_command = f"hmy blockchain delegation by-validator {v_addr} " \
+                      f"--node={args.hmy_endpoint_src}"
+    response = CLI.single_call(staking_command)
+    print(f"\tDelegator info transaction response: {response}")
+    return True
+
+
+@test
 def create_validator_many_keys():
-    print("== Running CLI staking tests ==")
     bls_keys = [d for d in bls_generator(10)]
 
     for acc in ACC_NAMES_ADDED:
@@ -226,110 +363,14 @@ def create_validator_many_keys():
     print("Failed CLI staking test.")
     sys.exit(-1)
 
-def edit_validator(address):
-    print("== Editing Validator ==")
 
-    old_bls_key = "1480fca328daaddd3487195c5500969ecccbb806b6bf464734e0e3ad18c64badfae8578d76e2e9281b6a3645d056960a"
-    new_bls_key = "249976f984f30306f800ef42fb45272b391cfdd17f966e093a9f711e30f66f77ecda6c367bf79afc9fa31a1789e9ee8e"
-    staking_command = f"hmy staking edit-validator --validator-addr {address} " \
-                  f"--identity foo --details bar --name baz " \
-                  f"--max-total-delegation 10 " \
-                  f"--min-self-delegation 1 --rate 0.1 --security-contact Leo  " \
-                  f"--website harmony.one --node={args.hmy_endpoint_src} " \
-                  f"--remove-bls-key {old_bls_key} --add-bls-key {new_bls_key} " \
-                  f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
-    response = CLI.single_call(staking_command)
-    print(f"\tStaking transaction response: {response}")
-
-    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
-    time.sleep(args.txn_delay)
-
-def create_delegator(address) -> str:
-    print("== Creating Delegator ==")
-    account_name = f"{ACC_NAME_PREFIX}delegator"
-    proc = CLI.expect_call(f"hmy keys add {account_name} --passphrase")
-    proc.expect("Enter passphrase\r\n")
-    proc.sendline(f"{args.passphrase}")
-    proc.expect("Repeat the passphrase:\r\n")
-    proc.sendline(f"{args.passphrase}")
-    proc.wait()
-    ACC_NAMES_ADDED.append(account_name)
-    delegator_address = CLI.get_address(account_name)
-    staking_command = f"hmy staking delegate --validator-addr {address} " \
-                  f"--delegator-addr {delegator_address} --amount 1 " \
-                  f"--node={args.hmy_endpoint_src} " \
-                  f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
-    response = CLI.single_call(staking_command)
-    print(f"\tDelegator transaction response: {response}")
-
-    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
-    time.sleep(args.txn_delay)
-
-    return delegator_address
-
-def undelegate(v_address, d_address):
-    print("== Undelegate ==")
-    staking_command = f"hmy staking undelegate --validator-addr {v_address} " \
-                  f"--delegator-addr {d_address} --amount 1 " \
-                  f"--node={args.hmy_endpoint_src} " \
-                  f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
-    response = CLI.single_call(staking_command)
-    print(f"\tUndelegate transaction response: {response}")
-
-    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
-    time.sleep(args.txn_delay)
-
-def collect_rewards(address):
-    print("== Collecting Rewards ==")
-    staking_command = f"hmy staking collect-rewards --delegator-addr {address} " \
-                  f"--node={args.hmy_endpoint_src} " \
-                  f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
-    response = CLI.single_call(staking_command)
-    print(f"\tCollect rewards transaction response: {response}")
-
-    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
-    time.sleep(args.txn_delay)
-
-def get_validators():
-    print("== Listing All Active Validators ==")
-    staking_command = f"hmy blockchain validator all-active " \
-                  f"--node={args.hmy_endpoint_src} "
-    response = CLI.single_call(staking_command)
-    print(f"\tValidator transaction response: {response}")
-
-    print("== Listing History of All Validators ==")
-    staking_command = f"hmy blockchain validator all " \
-                  f"--node={args.hmy_endpoint_src} "
-    response = CLI.single_call(staking_command)
-    print(f"\tValidator transaction response: {response}")
-
-def get_validator_info(v_addr):
-    print("== Getting Validator Info ==")
-    staking_command = f"hmy blockchain validator information {v_addr} " \
-                  f"--node={args.hmy_endpoint_src}"
-    response = CLI.single_call(staking_command)
-    print(f"\tValidator info transaction response: {response}")
-
-def get_delegator_info(v_addr, d_addr):
-    print("== Getting Delegator Info by Delegator ==")
-    staking_command = f"hmy blockchain delegation by-delegator {d_addr} " \
-                  f"--node={args.hmy_endpoint_src}"
-    response = CLI.single_call(staking_command)
-    print(f"\tDelegator info transaction response: {response} ")
-
-    print("== Getting Delegator Info by Validator ==")
-    staking_command = f"hmy blockchain delegation by-validator {v_addr} " \
-                  f"--node={args.hmy_endpoint_src}"
-    response = CLI.single_call(staking_command)
-    print(f"\tDelegator info transaction response: {response}")
-
-def get_raw_txn(passphrase, chain_id, node, src_shard, dst_shard) -> str:
+@announce
+def get_raw_txn(passphrase, chain_id, node, src_shard, dst_shard):
     """
     Must be cross shard transaction for tests.
 
     If importing keys using 'import-ks', no passphrase is needed.
     """
-    print("== Getting raw transaction ==")
     assert len(ACC_NAMES_ADDED) > 1, "Must load at least 2 keys and must match CLI's keystore format"
     for acc_name in ACC_NAMES_ADDED:
         balances = get_balance(acc_name, node)
@@ -356,19 +397,7 @@ def get_raw_txn(passphrase, chain_id, node, src_shard, dst_shard) -> str:
     raise RuntimeError(f"None of the loaded accounts have funds on shard {src_shard}")
 
 
-def get_shard_from_endpoint(endpoint):
-    """
-    Currently assumes <= 10 shards
-    """
-    re_match = re.search('\.s.\.', endpoint)
-    if re_match:
-        return int(re_match.group(0)[-2])
-    re_match = re.search(':950./', endpoint)
-    if re_match:
-        return int(re_match.group(0)[-2])
-    raise ValueError(f"Unknown endpoint format: {endpoint}")
-
-
+@announce
 def setup_newman_no_explorer(test_json, global_json, env_json):
     source_shard = args.src_shard if args.src_shard else get_shard_from_endpoint(args.hmy_endpoint_src)
     destination_shard = args.dst_shard if args.dst_shard else get_shard_from_endpoint(args.hmy_endpoint_dst)
@@ -393,6 +422,7 @@ def setup_newman_no_explorer(test_json, global_json, env_json):
             global_json["values"][i]["value"] = args.hmy_endpoint_dst
 
 
+@announce
 def setup_newman_only_explorer(test_json, global_json, env_json):
     if "localhost" in args.hmy_endpoint_src or "localhost" in args.hmy_exp_endpoint:
         print("\n\t[WARNING] This test is for testnet or mainnet.\n")
@@ -424,6 +454,7 @@ def setup_newman_only_explorer(test_json, global_json, env_json):
             global_json["values"][i]["value"] = args.hmy_endpoint_src
 
 
+@announce
 def setup_newman_default(test_json, global_json, env_json):
     if "localhost" in args.hmy_endpoint_src or "localhost" in args.hmy_exp_endpoint:
         print("\n\t[WARNING] This test is for testnet or mainnet.\n")
@@ -459,32 +490,34 @@ def setup_newman_default(test_json, global_json, env_json):
 
 if __name__ == "__main__":
     args = parse_args()
-    print("\n\t== Starting Tests ==\n")
-    if args.chain_id not in {"mainnet", "testnet", "pangaea"}:
-        args.chain_id = "testnet"
-    assert os.path.isdir(args.keys_dir), "Could not find keystore directory"
-
     CLI = pyhmy.HmyCLI(environment=pyhmy.get_environment(), hmy_binary_path=args.hmy_binary_path)
+    assert os.path.isfile(CLI.hmy_binary_path), "CLI binary is not found, specify it with option."
+    version_str = re.search('version v.*-', CLI.version).group(0).split('-')[0].replace("version v", "")
+    assert int(version_str) >= 170, "CLI binary is the wrong version."
+    assert os.path.isdir(args.keys_dir), "Could not find keystore directory"
+    assert is_active_shard(args.hmy_endpoint_src), "The source shard endpoint is NOT active."
+    # assert is_active_shard(args.hmy_endpoint_dst), "The destination shard endpoint is NOT active."
+    if args.chain_id not in json.loads(CLI.single_call("hmy blockchain known-chains")):
+        args.chain_id = "testnet"
     exit_code = 0
-    print(f"CLI Version: {CLI.version}")
 
     try:
         load_keys()
 
         print(f"Waiting for epoch {args.start_epoch} (or later)")
-        while not is_after_epoch(args.start_epoch-1):
+        while not is_after_epoch(args.start_epoch - 1, args.hmy_endpoint_src):
             time.sleep(5)
 
         if not args.ignore_staking_test:
             test_validators = create_validator()
-            create_validator_many_keys()
-            edit_validator(test_validators[0])
-            delegator = create_delegator(test_validators[0])
-            undelegate(test_validators[0], delegator)
-            collect_rewards(delegator)
-            get_validators()
-            get_validator_info(test_validators[0])
-            get_delegator_info(test_validators[0], delegator)
+            check_validators(test_validators)
+            v_addr = random.choice(list(test_validators.keys()))
+            # edit_validator(test_validators)
+            d_addr = create_delegator(v_addr)
+            check_validators(d_addr)
+            undelegate(v_addr, d_addr)
+            collect_rewards(d_addr)
+            # create_validator_many_keys()
 
         if not args.ignore_regression_test:
             with open(f"{args.test_dir}/test.json", 'r') as f:
@@ -506,24 +539,24 @@ if __name__ == "__main__":
             with open(f"{args.test_dir}/env.json", 'w') as f:
                 json.dump(env_json, f)
 
-            for i in range(args.iterations):
-                print(f"\n\tIteration {i+1} out of {args.iterations}\n")
+            for n in range(args.iterations):
+                print(f"\n\tIteration {n+1} out of {args.iterations}\n")
                 proc = subprocess.Popen(["newman", "run", f"{args.test_dir}/test.json",
                                          "-e", f"{args.test_dir}/env.json",
                                          "-g", f"{args.test_dir}/global.json"])
                 proc.wait()
                 exit_code = proc.returncode
                 if proc.returncode == 0:
-                    print(f"\n\tSucceeded in {i+1} attempt(s)\n")
+                    print(f"\n\tSucceeded in {n+1} attempt(s)\n")
                     break
 
     except (RuntimeError, KeyboardInterrupt) as err:
         print("Removing imported keys from CLI's keystore...")
-        for acc_name in ACC_NAMES_ADDED:
-            CLI.remove_account(acc_name)
+        for acc in ACC_NAMES_ADDED:
+            CLI.remove_account(acc)
         raise err
 
     print("Removing imported keys from CLI's keystore...")
-    for acc_name in ACC_NAMES_ADDED:
-        CLI.remove_account(acc_name)
+    for acc in ACC_NAMES_ADDED:
+        CLI.remove_account(acc)
     sys.exit(exit_code)
