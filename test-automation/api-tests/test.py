@@ -69,6 +69,16 @@ def add_key(name):
     ACC_NAMES_ADDED.append(name)
 
 
+def get_faucet_account(min_funds):
+    """
+    Only looks for accounts that have funds on shard 0.
+    """
+    for acc_name in ACC_NAMES_ADDED:
+        if float(get_balance(acc_name, args.hmy_endpoint_src)[0]["amount"]) > min_funds:
+            return acc_name
+    raise RuntimeError(f"None of the loaded accounts have at least {min_funds} on shard 0")
+
+
 def bls_generator(count, key_dir="/tmp", filter_fn=None):
     assert os.path.isabs(key_dir)
     if filter_fn is not None:
@@ -136,7 +146,7 @@ def create_validator():
     # new_val_count = 3
     new_val_count = 1
     amount = 3  # Must be > 1 b/c of min-self-delegation
-    added_validators = {}
+    validator_addresses = {}
     # Sourced from harmony/test/config/local-resharding.txt (Keys must be in provided keystore).
     foundational_node_data = [
         ("one1ghkz3frhske7emk79p7v2afmj4a5t0kmjyt4s5",
@@ -161,13 +171,7 @@ def create_validator():
          "16513c487a6bb76f37219f3c2927a4f281f9dd3fd6ed2e3a64e500de6545cf391dd973cc228d24f9bd01efe94912e714")
     ]
 
-    funding_account_name = None
-    min_funding_acc_funds = new_val_count * amount + (new_val_count * 1)  # +1/new_acc for gas overhead.
-    for candidate_acc_names in ACC_NAMES_ADDED:
-        if float(get_balance(candidate_acc_names, args.hmy_endpoint_src)[0]["amount"]) > min_funding_acc_funds:
-            funding_account_name = candidate_acc_names
-            break
-    assert funding_account_name is not None, "Imported keys don't have enough funds for the test"
+    faucet_acc_name = get_faucet_account(new_val_count * amount + (new_val_count * 1))  # +1/new_acc for gas overhead
 
     while not is_after_epoch(0, args.hmy_endpoint_src):
         print("Waiting for epoch 1...")
@@ -178,12 +182,12 @@ def create_validator():
         CLI.remove_account(val_name)
         add_key(val_name)
         val_address = CLI.get_address(val_name)
-        fund_account(funding_account_name, val_name, amount + 1)  # +1 for gas overhead.
+        fund_account(faucet_acc_name, val_name, amount + 1)  # +1 for gas overhead.
 
         rates = random.uniform(0, 1), random.uniform(0, 1)
         rate, max_rate = min(rates), max(rates)
         max_change_rate = random.uniform(0, 1)
-        max_total_delegation = random.randint(amount, 100)
+        max_total_delegation = random.randint(amount + 1, 100)
         proc = CLI.expect_call(f"hmy --node={args.hmy_endpoint_src} staking create-validator "
                                f"--validator-addr {val_address} --name {val_name} "
                                f"--identity test_account --website harmony.one "
@@ -199,14 +203,15 @@ def create_validator():
         txn = json.loads(proc.read().decode())
         print(f"{COLOR.OKGREEN}Created validator {val_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
         data = {
-            "pub-bls-key": bls_key['public-key'],
             "time-created": datetime.datetime.utcnow(),
+            "pub-bls-key": bls_key['public-key'],
+            "amount": amount,
             "rate": rate,
             "max-rate": max_rate,
             "max_change_rate": max_change_rate,
             "max_total_delegation": max_total_delegation
         }
-        added_validators[val_address] = data
+        validator_addresses[val_address] = data
 
     gopath = get_gopath()
     for val_address, key in foundational_node_data:
@@ -214,10 +219,11 @@ def create_validator():
         if val_names and float(get_balance(val_names[0], args.hmy_endpoint_src)[0]["amount"]) < amount + 1:
             key_path = f"{gopath}/src/github.com/harmony-one/harmony/.hmy/{key}.key"
             assert os.path.isfile(key_path)
+
             rates = random.uniform(0, 1), random.uniform(0, 1)
             rate, max_rate = min(rates), max(rates)
             max_change_rate = random.uniform(0, 1)
-            max_total_delegation = random.randint(amount, 100)
+            max_total_delegation = random.randint(amount + 1, 100)  # +1 for delegation.
             proc = CLI.expect_call(f"hmy --node={args.hmy_endpoint_src} staking create-validator "
                                    f"--validator-addr {val_address} --name {val_names[0]} "
                                    f"--identity test_account --website harmony.one "
@@ -233,92 +239,66 @@ def create_validator():
             txn = json.loads(proc.read().decode())
             print(f"{COLOR.OKGREEN}Created validator {val_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
             data = {
-                "pub-bls-key": key,
                 "time-created": datetime.datetime.utcnow(),
+                "pub-bls-key": key,
+                "amount": amount,
                 "rate": rate,
                 "max-rate": max_rate,
                 "max_change_rate": max_change_rate,
                 "max_total_delegation": max_total_delegation
             }
-            added_validators[val_address] = data
+            validator_addresses[val_address] = data
 
-    return added_validators
+    return validator_addresses
 
 
 @test
-def check_validators(added_validators):
-    for address, data in added_validators:
+def check_validators(validator_addresses):
+    for address, data in validator_addresses:
         # TODO parse all validators and check them.
-        print(f"{COLOR.HEADER}Validator address: {v_addr}{COLOR.ENDC}\n")
+        print(f"{COLOR.HEADER}Validator address: {address}{COLOR.ENDC}\n")
         response = json.loads(CLI.single_call(f"hmy --node={args.hmy_endpoint_src} blockchain validator all"))
         print(f"{COLOR.OKGREEN}Current validators:{COLOR.ENDC}\n{json.dumps(response, indent=4)}\n")
-        if v_addr not in response["result"]:
-            print(f"Validator ({v_addr}) is not on blockchain.")
+        if address not in response["result"]:
+            print(f"Validator ({address}) is not on blockchain.")
             return False
 
-    response = json.loads(CLI.single_call(f"hmy --node={args.hmy_endpoint_src} "
-                                          f"blockchain validator information {v_addr}"))
-    print(f"{COLOR.OKGREEN}Validator ({v_addr}) information:{COLOR.ENDC}\n{json.dumps(response, indent=4)}\n")
-    # TODO: check if information matches the create-validator command.
+        response = json.loads(CLI.single_call(f"hmy --node={args.hmy_endpoint_src} "
+                                              f"blockchain validator information {address}"))
+        print(f"{COLOR.OKGREEN}Validator ({address}) information:{COLOR.ENDC}\n{json.dumps(response, indent=4)}\n")
+        # TODO: check if information matches the create-validator command.
     return True
 
 
 @test
-def create_delegator(val_address):
-    account_name = f"{ACC_NAME_PREFIX}delegator"
-    add_key(account_name)
-    delegator_address = CLI.get_address(account_name)
-    funding_account_name = None
-    for candidate_acc_names in ACC_NAMES_ADDED:
-        if float(get_balance(candidate_acc_names, args.hmy_endpoint_src)[0]["amount"]) > 3:  # 2 + 1 for gas overhead.
-            funding_account_name = candidate_acc_names
-            break
-    assert funding_account_name is not None, "Imported keys don't have enough funds for the test"
-    fund_account(funding_account_name, account_name, 2)  # 1 + 1 for gas overhead.
+def create_delegators(validator_addresses):
+    delegator_addresses = {}
+    for address, data in validator_addresses:
+        account_name = f"{ACC_NAME_PREFIX}delegator"
+        add_key(account_name)
+        delegator_address = CLI.get_address(account_name)
+        amount = random.randint(1, data["max_total_delegation"] - data["amount"])
+        faucet_acc_name = get_faucet_account(3)  # 2 + 1 for gas overhead.
+        fund_account(faucet_acc_name, account_name, 2)  # 1 + 1 for gas overhead.
 
-    staking_command = f"hmy staking delegate --validator-addr {val_address} " \
-                      f"--delegator-addr {delegator_address} --amount 1 " \
-                      f"--node={args.hmy_endpoint_src} " \
-                      f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
-    response = CLI.single_call(staking_command)
-    print(f"\tDelegator transaction response: {response}")
+        staking_command = f"hmy staking delegate --validator-addr {address} " \
+                          f"--delegator-addr {delegator_address} --amount {amount} " \
+                          f"--node={args.hmy_endpoint_src} " \
+                          f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
+        response = CLI.single_call(staking_command)
+        print(f"\tDelegator transaction response: {response}")
+        # TODO: check response + pretty print
 
-    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
-    time.sleep(args.txn_delay)
+        print(f"Sleeping {args.txn_delay} seconds for finality...\n")
+        time.sleep(args.txn_delay)  # TODO: sleep outside of the test...
 
-    return delegator_address
+        delegator_addresses[delegator_address] = {}
+    return delegator_addresses
 
 
+# TODO: refactor this to check delegators (BEWARE OF THE MISSING PARAMS...)
 @test
-def undelegate(v_address, d_address):
-    staking_command = f"hmy staking undelegate --validator-addr {v_address} " \
-                      f"--delegator-addr {d_address} --amount 1 " \
-                      f"--node={args.hmy_endpoint_src} " \
-                      f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
-    response = CLI.single_call(staking_command)
-    print(f"\tUndelegate transaction response: {response}")
-
-    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
-    time.sleep(args.txn_delay)
-    return True
-
-
-@test
-def collect_rewards(address):
-    print("== Collecting Rewards ==")
-    staking_command = f"hmy staking collect-rewards --delegator-addr {address} " \
-                      f"--node={args.hmy_endpoint_src} " \
-                      f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
-    response = CLI.single_call(staking_command)
-    print(f"\tCollect rewards transaction response: {response}")
-
-    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
-    time.sleep(args.txn_delay)
-    return True
-
-
-@test
-def get_delegator_info(v_addr, d_addr):
+def check_delegator(delegator_addresses):
     print("== Getting Delegator Info by Delegator ==")
     staking_command = f"hmy blockchain delegation by-delegator {d_addr} " \
                       f"--node={args.hmy_endpoint_src}"
@@ -333,6 +313,41 @@ def get_delegator_info(v_addr, d_addr):
     return True
 
 
+@test
+def undelegate(validator_addresses, delegator_addresses):
+    # TODO undelegate the appropriate amount of funds, this is why we carry the data.
+    for v_address, d_address in zip(validator_addresses.keys(), delegator_addresses.keys()):
+        staking_command = f"hmy staking undelegate --validator-addr {v_address} " \
+                          f"--delegator-addr {d_address} --amount 1 " \
+                          f"--node={args.hmy_endpoint_src} " \
+                          f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
+        response = CLI.single_call(staking_command)
+        print(f"\tUndelegate transaction response: {response}")
+        # TODO: check response + pretty print.
+
+    # TODO: try a self undelegation....
+
+    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
+    time.sleep(args.txn_delay)  # TODO: sleep outside of the test...
+    return True
+
+
+# TODO: put in a check or rewards amount check before collecting rewards.
+@test
+def collect_rewards(address):
+    print("== Collecting Rewards ==")
+    staking_command = f"hmy staking collect-rewards --delegator-addr {address} " \
+                      f"--node={args.hmy_endpoint_src} " \
+                      f"--chain-id={args.chain_id} --passphrase={args.passphrase}"
+    response = CLI.single_call(staking_command)
+    print(f"\tCollect rewards transaction response: {response}")
+
+    print(f"Sleeping {args.txn_delay} seconds for finality...\n")
+    time.sleep(args.txn_delay)
+    return True
+
+
+# TODO: put in the pexpect logic to handle loading multiple bls keys.
 @test
 def create_validator_many_keys():
     bls_keys = [d for d in bls_generator(10)]
@@ -364,12 +379,12 @@ def create_validator_many_keys():
     sys.exit(-1)
 
 
+# TODO: go-over and refactor / prettify things (KEY!!!)
+
 @announce
-def get_raw_txn(passphrase, chain_id, node, src_shard, dst_shard):
+def get_raw_cx(passphrase, chain_id, node, src_shard, dst_shard):
     """
     Must be cross shard transaction for tests.
-
-    If importing keys using 'import-ks', no passphrase is needed.
     """
     assert len(ACC_NAMES_ADDED) > 1, "Must load at least 2 keys and must match CLI's keystore format"
     for acc_name in ACC_NAMES_ADDED:
@@ -401,8 +416,8 @@ def get_raw_txn(passphrase, chain_id, node, src_shard, dst_shard):
 def setup_newman_no_explorer(test_json, global_json, env_json):
     source_shard = args.src_shard if args.src_shard else get_shard_from_endpoint(args.hmy_endpoint_src)
     destination_shard = args.dst_shard if args.dst_shard else get_shard_from_endpoint(args.hmy_endpoint_dst)
-    raw_txn = get_raw_txn(passphrase=args.passphrase, chain_id=args.chain_id,
-                          node=args.hmy_endpoint_src, src_shard=source_shard, dst_shard=destination_shard)
+    raw_txn = get_raw_cx(passphrase=args.passphrase, chain_id=args.chain_id,
+                         node=args.hmy_endpoint_src, src_shard=source_shard, dst_shard=destination_shard)
 
     if str(source_shard) not in args.hmy_endpoint_src:
         print(f"Source shard {source_shard} may not match source endpoint {args.hmy_endpoint_src}")
@@ -429,8 +444,8 @@ def setup_newman_only_explorer(test_json, global_json, env_json):
 
     source_shard = args.src_shard if args.src_shard else get_shard_from_endpoint(args.hmy_endpoint_src)
     destination_shard = args.dst_shard if args.dst_shard else get_shard_from_endpoint(args.hmy_endpoint_dst)
-    raw_txn = get_raw_txn(passphrase=args.passphrase, chain_id=args.chain_id,
-                          node=args.hmy_endpoint_src, src_shard=source_shard, dst_shard=destination_shard)
+    raw_txn = get_raw_cx(passphrase=args.passphrase, chain_id=args.chain_id,
+                         node=args.hmy_endpoint_src, src_shard=source_shard, dst_shard=destination_shard)
 
     if str(source_shard) not in args.hmy_endpoint_src:
         print(f"Source shard {source_shard} may not match source endpoint {args.hmy_endpoint_src}")
@@ -461,8 +476,8 @@ def setup_newman_default(test_json, global_json, env_json):
 
     source_shard = args.src_shard if args.src_shard else get_shard_from_endpoint(args.hmy_endpoint_src)
     destination_shard = args.dst_shard if args.dst_shard else get_shard_from_endpoint(args.hmy_endpoint_dst)
-    raw_txn = get_raw_txn(passphrase=args.passphrase, chain_id=args.chain_id,
-                          node=args.hmy_endpoint_src, src_shard=source_shard, dst_shard=destination_shard)
+    raw_txn = get_raw_cx(passphrase=args.passphrase, chain_id=args.chain_id,
+                         node=args.hmy_endpoint_src, src_shard=source_shard, dst_shard=destination_shard)
 
     if str(source_shard) not in args.hmy_endpoint_src:
         print(f"Source shard {source_shard} may not match source endpoint {args.hmy_endpoint_src}")
@@ -511,12 +526,11 @@ if __name__ == "__main__":
         if not args.ignore_staking_test:
             test_validators = create_validator()
             check_validators(test_validators)
-            v_addr = random.choice(list(test_validators.keys()))
+            test_delegators = create_delegators(test_validators)
+            check_delegator(test_delegators)
             # edit_validator(test_validators)
-            d_addr = create_delegator(v_addr)
-            check_validators(d_addr)
-            undelegate(v_addr, d_addr)
-            collect_rewards(d_addr)
+            undelegate(test_validators, test_delegators)
+            collect_rewards(test_delegators)  # Might have to disable or check for explicit nonce.
             # create_validator_many_keys()
 
         if not args.ignore_regression_test:
