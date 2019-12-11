@@ -2,6 +2,8 @@ import json
 import datetime
 import re
 import subprocess
+import traceback
+import sys
 
 import requests
 
@@ -33,7 +35,7 @@ def get_sharding_structure(endpoint):
     return json.loads(response.content)
 
 
-def is_active_shard(endpoint, delay_tolerance=45):
+def is_active_shard(endpoint, delay_tolerance=60):
     """
     :param endpoint: The endpoint of the SHARD to check
     :param delay_tolerance: The time (in seconds) that the shard timestamp can be behind
@@ -55,7 +57,7 @@ def is_active_shard(endpoint, delay_tolerance=45):
         timestamp = datetime.datetime.strptime(body["result"]["timestamp"], TIMESTAMP_FORMAT).replace(tzinfo=None)
         time_delta = curr_time - timestamp
         return abs(time_delta.seconds) < delay_tolerance
-    except (requests.ConnectionError, KeyError):
+    except (requests.ConnectionError, json.decoder.JSONDecodeError, KeyError):
         return False
 
 
@@ -78,7 +80,7 @@ def is_after_epoch(n, endpoint):
         response = requests.request('POST', endpoint, headers=headers, data=payload, allow_redirects=False, timeout=3)
         body = json.loads(response.content)
         return int(body["result"]["epoch"]) > n
-    except (requests.ConnectionError, KeyError):
+    except (requests.ConnectionError, json.decoder.JSONDecodeError, KeyError):
         return False
 
 
@@ -93,6 +95,14 @@ def get_shard_from_endpoint(endpoint):
     if re_match:
         return int(re_match.group(0)[-2])
     raise ValueError(f"Unknown endpoint format: {endpoint}")
+
+
+def json_load(string):
+    try:
+        return json.loads(string)
+    except Exception as e:
+        print(f"{COLOR.FAIL}Could not parse input: '{string}'{COLOR.ENDC}")
+        raise e from e
 
 
 def get_gopath():
@@ -126,8 +136,8 @@ def test(fn):
             else:
                 print(f"\n\t{COLOR.FAIL}{COLOR.UNDERLINE}== FAILED test: {fn.__name__} =={COLOR.ENDC}\n")
             return to_be_returned
-        except Exception as e:  # Catch all to print that it failed.
+        except Exception as e:  # Catch all to continue to other tests in same script.
             print(f"\n\t{COLOR.FAIL}{COLOR.UNDERLINE}== FAILED test: {fn.__name__} =={COLOR.ENDC}\n")
-            raise e from e
+            print(f"{COLOR.FAIL}Exception:\n {e}{COLOR.ENDC}")
 
     return wrap
