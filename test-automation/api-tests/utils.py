@@ -2,8 +2,6 @@ import json
 import datetime
 import re
 import subprocess
-import traceback
-import sys
 
 import requests
 
@@ -115,7 +113,7 @@ def announce(fn):
     """
 
     def wrap(*args):
-        print(f"{COLOR.OKBLUE}{COLOR.BOLD}Running: {fn.__name__}{args}{COLOR.ENDC}")
+        print(f"{COLOR.OKBLUE}{COLOR.BOLD}Running: {fn.__name__}{COLOR.ENDC}")
         return fn(*args)
 
     return wrap
