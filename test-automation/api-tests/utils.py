@@ -2,6 +2,7 @@ import json
 import datetime
 import re
 import subprocess
+import traceback
 
 import requests
 
@@ -20,6 +21,10 @@ class COLOR:
 
 
 def get_sharding_structure(endpoint):
+    """
+    :param endpoint: An endpoint of a SHARD
+    :return: The shading structure of the network associated with the ENDPOINT.
+    """
     payload = """{
            "jsonrpc": "2.0",
            "method": "hmy_getShardingStructure",
@@ -31,6 +36,35 @@ def get_sharding_structure(endpoint):
     }
     response = requests.request('POST', endpoint, headers=headers, data=payload, allow_redirects=False, timeout=3)
     return json.loads(response.content)
+
+
+def get_endpoint(shard_number, endpoint):
+    """
+    :param shard_number: The shard number of the desired endpoint
+    :param endpoint: Any endpoint of a network
+    """
+    structure = get_sharding_structure(endpoint)
+    assert shard_number < len(structure["result"])
+    return structure["result"][shard_number]["http"]
+
+
+def get_current_epoch(endpoint):
+    """
+    :param endpoint: The endpoint of the SHARD to check
+    :return: The current epoch of the ENDPOINT
+    """
+    payload = """{
+            "jsonrpc": "2.0",
+            "method": "hmy_latestHeader",
+            "params": [  ],
+            "id": 1
+        }"""
+    headers = {
+        'Content-Type': 'application/json'
+    }
+    response = requests.request('POST', endpoint, headers=headers, data=payload, allow_redirects=False, timeout=3)
+    body = json.loads(response.content)
+    return int(body["result"]["epoch"])
 
 
 def is_active_shard(endpoint, delay_tolerance=60):
@@ -65,19 +99,8 @@ def is_after_epoch(n, endpoint):
     :param endpoint: The endpoint of the SHARD to check
     :return: If it is (strictly) after epoch N
     """
-    payload = """{
-        "jsonrpc": "2.0",
-        "method": "hmy_latestHeader",
-        "params": [  ],
-        "id": 1
-    }"""
-    headers = {
-        'Content-Type': 'application/json'
-    }
     try:
-        response = requests.request('POST', endpoint, headers=headers, data=payload, allow_redirects=False, timeout=3)
-        body = json.loads(response.content)
-        return int(body["result"]["epoch"]) > n
+        return get_current_epoch(endpoint) > n
     except (requests.ConnectionError, json.decoder.JSONDecodeError, KeyError):
         return False
 
@@ -96,6 +119,10 @@ def get_shard_from_endpoint(endpoint):
 
 
 def json_load(string):
+    """
+    Load a JSON string to a dictionary, while printing the failed input should
+    an error arise.
+    """
     try:
         return json.loads(string)
     except Exception as e:
@@ -109,7 +136,7 @@ def get_gopath():
 
 def announce(fn):
     """
-    Simple decorator to announce (via printing) that a function has been called.
+    Decorator to announce (via printing) that a function has been called.
     """
 
     def wrap(*args):
@@ -122,7 +149,6 @@ def announce(fn):
 def test(fn):
     """
     Test function wrapper.
-    :return If the test passed or not.
     """
 
     def wrap(*args):
@@ -136,6 +162,8 @@ def test(fn):
             return to_be_returned
         except Exception as e:  # Catch all to continue to other tests in same script.
             print(f"\n\t{COLOR.FAIL}{COLOR.UNDERLINE}== FAILED test: {fn.__name__} =={COLOR.ENDC}\n")
-            print(f"{COLOR.FAIL}Exception:\n {e}{COLOR.ENDC}")
+            print(f"{COLOR.FAIL}Exception:{e}\n")
+            traceback.print_exc()
+            print(COLOR.ENDC)
 
     return wrap
