@@ -139,9 +139,9 @@ def announce(fn):
     Decorator to announce (via printing) that a function has been called.
     """
 
-    def wrap(*args):
+    def wrap(*args, **kwargs):
         print(f"{COLOR.OKBLUE}{COLOR.BOLD}Running: {fn.__name__}{COLOR.ENDC}")
-        return fn(*args)
+        return fn(*args, **kwargs)
 
     return wrap
 
@@ -151,10 +151,10 @@ def test(fn):
     Test function wrapper.
     """
 
-    def wrap(*args):
+    def wrap(*args, **kwargs):
         print(f"\n\t{COLOR.HEADER}== Start test: {fn.__name__} =={COLOR.ENDC}\n")
         try:
-            to_be_returned = fn(*args)
+            to_be_returned = fn(*args, **kwargs)
             if to_be_returned:
                 print(f"\n\t{COLOR.HEADER}{COLOR.UNDERLINE}== Passed test: {fn.__name__} =={COLOR.ENDC}\n")
             else:
