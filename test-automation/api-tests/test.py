@@ -686,19 +686,19 @@ def staking_integration_test():
     print(f"{COLOR.UNDERLINE}{COLOR.BOLD} == Running staking integration test == {COLOR.ENDC}")
     # test_validators = create_simple_validators(validator_count=1)
     #
-    # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...")
+    # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
     # time.sleep(args.txn_delay)
     #
     # check_validators(test_validators)
     # test_delegators = create_simple_delegators(test_validators)
     #
-    # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...")
+    # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
     # time.sleep(args.txn_delay)
     #
     # check_delegators(test_delegators)
     # edit_validators(test_validators)
     #
-    # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...")
+    # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
     # time.sleep(args.txn_delay)
     #
     # check_validators(test_validators)
@@ -708,18 +708,18 @@ def staking_integration_test():
     # TODO: Check if the bottom code will break Devnet via localnet test.
     many_keys_validator_singleton = create_single_validator_many_keys(bls_keys_count=5)
 
-    print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...")
+    print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
     time.sleep(args.txn_delay)
 
     check_validators(many_keys_validator_singleton)
     edit_validators(many_keys_validator_singleton)
 
-    print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...")
+    print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
     time.sleep(args.txn_delay)
 
     check_validators(many_keys_validator_singleton)
 
-    # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...")
+    # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
     # time.sleep(args.txn_delay)
     # collect_rewards(test_delegators)  # TODO: implement logic for separate trigger.
     return 0  # TODO setup logic to return correct exit code.
