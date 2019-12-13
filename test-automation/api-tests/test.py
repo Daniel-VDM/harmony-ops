@@ -350,14 +350,6 @@ def edit_validators(validator_addresses):
                                             bls_generator(len(validator_addresses.keys()), key_dir="/tmp/edit_val")):
         max_total_delegation = ref_data['max_total_delegation'] + random.randint(1, 10)
         old_bls_key = ref_data['pub-bls-keys'].pop()
-        print(f"hmy staking edit-validator --validator-addr {address} "
-                               f"--identity test_account --website harmony.one --details none "
-                               f"--name {ref_data['keystore_name']} "
-                               f"--max-total-delegation {max_total_delegation} "
-                               f"--min-self-delegation 1 --rate {ref_data['rate']} --security-contact Leo  "
-                               f"--website harmony.one --node={endpoint} "
-                               f"--remove-bls-key {old_bls_key}  --add-bls-key {bls_key['public-key']} "
-                               f"--chain-id={args.chain_id} --passphrase={args.passphrase}")
         proc = CLI.expect_call(f"hmy staking edit-validator --validator-addr {address} "
                                f"--identity test_account --website harmony.one --details none "
                                f"--name {ref_data['keystore_name']} "
@@ -530,14 +522,6 @@ def create_single_validator_many_keys(bls_keys_count):
     max_total_delegation = random.randint(amount + 1, 10)
     bls_keys = [d for d in bls_generator(bls_keys_count, key_dir="/tmp/single_val_many_keys")]
     bls_key_string = ','.join(el["public-key"] for el in bls_keys)
-    print(f"hmy --node={endpoint} staking create-validator "
-                           f"--validator-addr {val_address} --name {val_name} "
-                           f"--identity test_account --website harmony.one "
-                           f"--security-contact Daniel-VDM --details none --rate {rate} --max-rate {max_rate} "
-                           f"--max-change-rate {max_change_rate} --min-self-delegation 1 "
-                           f"--max-total-delegation {max_total_delegation} "
-                           f"--amount {amount} --bls-pubkeys {bls_key_string} "
-                           f"--chain-id {args.chain_id} --passphrase={args.passphrase}")
     proc = CLI.expect_call(f"hmy --node={endpoint} staking create-validator "
                            f"--validator-addr {val_address} --name {val_name} "
                            f"--identity test_account --website harmony.one "
