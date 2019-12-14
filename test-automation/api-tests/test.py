@@ -176,12 +176,13 @@ def create_simple_validators(validator_count):
                                f"--max-total-delegation {max_total_delegation} "
                                f"--amount {amount} --bls-pubkeys {bls_key['public-key']} "
                                f"--chain-id {args.chain_id} --passphrase={args.passphrase}")
-        pub_key_str = str(bls_key["public-key"])[2:]
+        pub_key_str = bls_key["public-key"].replace("0x", "")
         proc.expect(f"For bls public key: {pub_key_str}\r\n")
         proc.expect("Enter the absolute path to the encrypted bls private key file:\r\n")
         proc.sendline(bls_key["encrypted-private-key-path"])
         proc.expect("Enter the bls passphrase:\r\n")
         proc.sendline(f"{args.passphrase}")
+        curr_epoch = get_current_epoch(endpoint)
         proc.expect(pexpect.EOF)
         txn = json_load(proc.before.decode())
         assert "transaction-receipt" in txn.keys()
@@ -189,8 +190,8 @@ def create_simple_validators(validator_count):
         print(f"{COLOR.OKGREEN}Sent create validator for "
               f"{val_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
         ref_data = {
-            "time-created": datetime.datetime.utcnow().strftime(TIMESTAMP_FORMAT),
-            "pub-bls-keys": [bls_key['public-key']],
+            "last_epoch": curr_epoch,
+            "pub_bls_keys": [bls_key['public-key']],
             "amount": amount,
             "rate": rate,
             "max_rate": max_rate,
@@ -262,11 +263,12 @@ def create_custom_validators():
                                f"--max-total-delegation {max_total_delegation} "
                                f"--amount {amount} --bls-pubkeys {key} "
                                f"--chain-id {args.chain_id} --passphrase={args.passphrase}")
-        proc.expect(f"For bls public key: {key}\r\n")
+        proc.expect(f"For bls public key: {key.replace('0x', '')}\r\n")
         proc.expect("Enter the absolute path to the encrypted bls private key file:\r\n")
         proc.sendline(key_path)
         proc.expect("Enter the bls passphrase:\r\n")
         proc.sendline("")  # hardcoded passphrase for these bls keys.
+        curr_epoch = get_current_epoch(endpoint)
         proc.expect(pexpect.EOF)
         txn = json_load(proc.before.decode())
         assert "transaction-receipt" in txn.keys()
@@ -274,8 +276,8 @@ def create_custom_validators():
         print(f"{COLOR.OKGREEN}Sent create validator for "
               f"{val_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
         ref_data = {
-            "time-created": datetime.datetime.utcnow().strftime(TIMESTAMP_FORMAT),
-            "pub-bls-keys": [key],
+            "last_epoch": curr_epoch,
+            "pub_bls_keys": [key],
             "amount": amount,
             "rate": rate,
             "max_rate": max_rate,
@@ -314,20 +316,24 @@ def check_validators(validator_addresses):
         else:
             print(f"{COLOR.WARNING}Validator in pool of ACTIVE validators.")
             # Don't throw an error, just inform.
+        curr_epoch = get_current_epoch(endpoint)
         val_info = json_load(CLI.single_call(f"hmy --node={endpoint} blockchain validator information {address}"))
         print(f"{COLOR.OKGREEN}Validator information:{COLOR.ENDC}\n{json.dumps(val_info, indent=4)}")
         if args.debug:
             print(f"Reference data for {address}: {json.dumps(ref_data, indent=4)}")
         assert val_info["result"] is not None
-        reference_keys = set(map(lambda e: int(e, 16), ref_data["pub-bls-keys"]))
-        for key in val_info["result"]["slot_pub_keys"]:
-            assert int(key, 16) in reference_keys
-        assert int(ref_data["max_total_delegation"] * 1e18) == val_info["result"]["max_total_delegation"]
-        assert int(ref_data["min_self_delegation"] * 1e18) == val_info["result"]["min_self_delegation"]
-        commission_rates = val_info["result"]["commission"]["commission_rates"]
+        if curr_epoch > ref_data["last_epoch"]:
+            reference_keys = set(map(lambda e: int(e, 16), ref_data["pub_bls_keys"]))
+            for key in val_info["result"]["bls-public-keys"]:
+                assert int(key, 16) in reference_keys
+        else:
+            print(f"{COLOR.WARNING}Validator edited/created this epoch, bls-keys unchecked.")
+        assert int(ref_data["max_total_delegation"] * 1e18) == val_info["result"]["max-total-delegation"]
+        assert int(ref_data["min_self_delegation"] * 1e18) == val_info["result"]["min-self-delegation"]
+        commission_rates = val_info["result"]["commission"]
         assert ref_data["rate"] == float(commission_rates["rate"])
-        assert ref_data["max_rate"] == float(commission_rates["max_rate"])
-        assert ref_data["max_change_rate"] == float(commission_rates["max_change_rate"])
+        assert ref_data["max_rate"] == float(commission_rates["max-rate"])
+        assert ref_data["max_change_rate"] == float(commission_rates["max-change-rate"])
         val_delegation = json_load(CLI.single_call(f"hmy blockchain delegation by-validator {address} "
                                                    f"--node={endpoint}"))
         print(f"{COLOR.OKGREEN}Validator delegation:{COLOR.ENDC}\n{json.dumps(val_delegation, indent=4)}")
@@ -349,7 +355,7 @@ def edit_validators(validator_addresses):
     for (address, ref_data), bls_key in zip(validator_addresses.items(),
                                             bls_generator(len(validator_addresses.keys()), key_dir="/tmp/edit_val")):
         max_total_delegation = ref_data['max_total_delegation'] + random.randint(1, 10)
-        old_bls_key = ref_data['pub-bls-keys'].pop()
+        old_bls_key = ref_data['pub_bls_keys'].pop()
         proc = CLI.expect_call(f"hmy staking edit-validator --validator-addr {address} "
                                f"--identity test_account --website harmony.one --details none "
                                f"--name {ref_data['keystore_name']} "
@@ -362,13 +368,15 @@ def edit_validators(validator_addresses):
         proc.sendline(bls_key["encrypted-private-key-path"])
         proc.expect("Enter the bls passphrase:\r\n")
         proc.sendline(f"{args.passphrase}")
+        curr_epoch = get_current_epoch(endpoint)
         proc.expect(pexpect.EOF)
         txn = json_load(proc.before.decode())
         assert "transaction-receipt" in txn.keys()
         assert txn["transaction-receipt"] is not None
         print(f"{COLOR.OKGREEN}Sent edit validator for "
               f"{address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
-        ref_data["pub-bls-keys"].append(bls_key["public-key"])
+        ref_data["last_epoch"] = curr_epoch
+        ref_data["pub_bls_keys"].append(bls_key["public-key"])
         ref_data["max_total_delegation"] = max_total_delegation
     return True
 
@@ -531,12 +539,13 @@ def create_single_validator_many_keys(bls_keys_count):
                            f"--amount {amount} --bls-pubkeys {bls_key_string} "
                            f"--chain-id {args.chain_id} --passphrase={args.passphrase}")
     for key in bls_keys:
-        pub_key_str = str(key["public-key"])[2:]
+        pub_key_str = key["public-key"].replace("0x", "")
         proc.expect(f"For bls public key: {pub_key_str}\r\n")
         proc.expect("Enter the absolute path to the encrypted bls private key file:\r\n")
         proc.sendline(key["encrypted-private-key-path"])
         proc.expect("Enter the bls passphrase:\r\n")
         proc.sendline(f"{args.passphrase}")
+    curr_epoch = get_current_epoch(endpoint)
     proc.expect(pexpect.EOF)
     txn = json_load(proc.before.decode())
     assert "transaction-receipt" in txn.keys()
@@ -544,8 +553,8 @@ def create_single_validator_many_keys(bls_keys_count):
     print(f"{COLOR.OKGREEN}Sent create validator for "
           f"{val_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
     ref_data = {
-        "time-created": datetime.datetime.utcnow().strftime(TIMESTAMP_FORMAT),
-        "pub-bls-keys": [key['public-key'] for key in bls_keys],
+        "epoch-created": curr_epoch,
+        "pub_bls_keys": [key['public-key'] for key in bls_keys],
         "amount": amount,
         "rate": rate,
         "max_rate": max_rate,
@@ -679,7 +688,7 @@ def setup_newman_default(test_json, global_json, env_json):
 
 
 def staking_integration_test():
-    print(f"{COLOR.UNDERLINE}{COLOR.BOLD} == Running staking integration test == {COLOR.ENDC}")
+    # print(f"{COLOR.UNDERLINE}{COLOR.BOLD} == Running staking integration test == {COLOR.ENDC}")
     # test_validators = create_simple_validators(validator_count=1)
     #
     # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")

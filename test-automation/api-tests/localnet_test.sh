@@ -56,7 +56,7 @@ python3 -m pip install pyhmy
 
 python3 test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http://localhost:9500/" \
         --rpc_endpoint_dst="http://localhost:9501/" --keystore=./LocalnetValidatorKeys/ \
-        --chain_id="localnet" --delay=${delay} --iterations=${iters} --cli_passphrase='' --ignore_regression_test
+        --chain_id="localnet" --delay=${delay} --iterations=${iters} --cli_passphrase='' --ignore_regression_test --debug
 
 # TODO: change this back for normal local-tests.
 #python3 test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http://localhost:9500/" \
