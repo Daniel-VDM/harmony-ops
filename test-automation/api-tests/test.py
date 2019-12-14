@@ -574,11 +574,7 @@ def get_raw_cx(passphrase, chain_id, node, src_shard, dst_shard):
         to_addr = CLI.get_address(random.choice(to_addr_candidates))
         if balances[src_shard]["amount"] >= 5:  # Ensure enough funds (even with high gas fees).
             print(f"Raw transaction details:\n"
-                  f"\tNode: {node}\n"
-                  f"\tFrom: {from_addr}\n"
-                  f"\tTo: {to_addr}\n"
-                  f"\tFrom-shard: {src_shard}\n"
-                  f"\tTo-shard: {dst_shard}")
+                  f"\tNode: {node}\n")
             response = CLI.single_call(f"hmy --node={node} transfer --from={from_addr} --to={to_addr} "
                                        f"--from-shard={src_shard} --to-shard={dst_shard} --amount={1e-9} "
                                        f"--chain-id={chain_id} --dry-run --passphrase={passphrase}")
@@ -610,9 +606,9 @@ def setup_newman_no_explorer(test_json, global_json, env_json):
             env_json["values"][i]["value"] = args.txn_delay
 
     for i, var in enumerate(global_json["values"]):
-        if var["key"] == "endpoint_src":
+        if var["key"] == "hmy_endpoint_src":
             global_json["values"][i]["value"] = args.endpoint_src
-        if var["key"] == "endpoint_dst":
+        if var["key"] == "hmy_endpoint_dst":
             global_json["values"][i]["value"] = args.endpoint_dst
 
 
@@ -642,9 +638,9 @@ def setup_newman_only_explorer(test_json, global_json, env_json):
             env_json["values"][i]["value"] = source_shard
 
     for i, var in enumerate(global_json["values"]):
-        if var["key"] == "endpoint_exp":
+        if var["key"] == "hmy_endpoint_src":
             global_json["values"][i]["value"] = args.endpoint_exp
-        if var["key"] == "endpoint_src":
+        if var["key"] == "hmy_endpoint_dst":
             global_json["values"][i]["value"] = args.endpoint_src
 
 
@@ -674,11 +670,11 @@ def setup_newman_default(test_json, global_json, env_json):
             env_json["values"][i]["value"] = source_shard
 
     for i, var in enumerate(global_json["values"]):
-        if var["key"] == "endpoint_src":
+        if var["key"] == "hmy_endpoint_src":
             global_json["values"][i]["value"] = args.endpoint_src
-        if var["key"] == "endpoint_dst":
+        if var["key"] == "hmy_endpoint_src":
             global_json["values"][i]["value"] = args.endpoint_dst
-        if var["key"] == "endpoint_exp":
+        if var["key"] == "hmy_exp_endpoint":
             global_json["values"][i]["value"] = args.endpoint_exp
 
 
