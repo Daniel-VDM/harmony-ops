@@ -152,16 +152,16 @@ def test(fn):
     """
 
     def wrap(*args, **kwargs):
-        print(f"\n\t{COLOR.HEADER}== Start test: {fn.__name__} =={COLOR.ENDC}\n")
+        print(f"\n{COLOR.HEADER}== Start test: {fn.__name__} =={COLOR.ENDC}\n")
         try:
             to_be_returned = fn(*args, **kwargs)
             if to_be_returned:
-                print(f"\n\t{COLOR.HEADER}{COLOR.UNDERLINE}== Passed test: {fn.__name__} =={COLOR.ENDC}\n")
+                print(f"\n{COLOR.HEADER}{COLOR.UNDERLINE}== Passed test: {fn.__name__} =={COLOR.ENDC}\n")
             else:
-                print(f"\n\t{COLOR.FAIL}{COLOR.UNDERLINE}== FAILED test: {fn.__name__} =={COLOR.ENDC}\n")
+                print(f"\n{COLOR.FAIL}{COLOR.UNDERLINE}== FAILED test: {fn.__name__} =={COLOR.ENDC}\n")
             return to_be_returned
         except Exception as e:  # Catch all to continue to other tests in same script.
-            print(f"\n\t{COLOR.FAIL}{COLOR.UNDERLINE}== FAILED test: {fn.__name__} =={COLOR.ENDC}\n")
+            print(f"\n{COLOR.FAIL}{COLOR.UNDERLINE}== FAILED test: {fn.__name__} =={COLOR.ENDC}\n")
             print(f"{COLOR.FAIL}Exception:{e}\n")
             traceback.print_exc()
             print(COLOR.ENDC)

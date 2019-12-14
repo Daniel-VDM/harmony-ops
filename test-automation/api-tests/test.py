@@ -190,7 +190,8 @@ def create_simple_validators(validator_count):
         print(f"{COLOR.OKGREEN}Sent create validator for "
               f"{val_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
         ref_data = {
-            "last_epoch": curr_epoch,
+            "time_created": datetime.datetime.utcnow().strftime(TIMESTAMP_FORMAT),
+            "last_edit_epoch": curr_epoch,
             "pub_bls_keys": [bls_key['public-key']],
             "amount": amount,
             "rate": rate,
@@ -276,7 +277,8 @@ def create_custom_validators():
         print(f"{COLOR.OKGREEN}Sent create validator for "
               f"{val_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
         ref_data = {
-            "last_epoch": curr_epoch,
+            "time_created": datetime.datetime.utcnow().strftime(TIMESTAMP_FORMAT),
+            "last_edit_epoch": curr_epoch,
             "pub_bls_keys": [key],
             "amount": amount,
             "rate": rate,
@@ -322,14 +324,11 @@ def check_validators(validator_addresses):
         if args.debug:
             print(f"Reference data for {address}: {json.dumps(ref_data, indent=4)}")
         assert val_info["result"] is not None
-        if curr_epoch > ref_data["last_epoch"]:
-            reference_keys = set(map(lambda e: int(e, 16), ref_data["pub_bls_keys"]))
-            for key in val_info["result"]["bls-public-keys"]:
-                assert int(key, 16) in reference_keys
-        else:
-            print(f"{COLOR.WARNING}Validator edited/created this epoch, bls-keys unchecked.")
-        assert int(ref_data["max_total_delegation"] * 1e18) == val_info["result"]["max-total-delegation"]
-        assert int(ref_data["min_self_delegation"] * 1e18) == val_info["result"]["min-self-delegation"]
+        reference_keys = set(map(lambda e: int(e, 16), ref_data["pub_bls_keys"]))
+        for key in val_info["result"]["bls-public-keys"]:
+            assert int(key, 16) in reference_keys
+        assert ref_data["max_total_delegation"] * 1e18 - val_info["result"]["max-total-delegation"] == 0
+        assert ref_data["min_self_delegation"] * 1e18 - val_info["result"]["min-self-delegation"] == 0
         commission_rates = val_info["result"]["commission"]
         assert ref_data["rate"] == float(commission_rates["rate"])
         assert ref_data["max_rate"] == float(commission_rates["max-rate"])
@@ -345,6 +344,8 @@ def check_validators(validator_addresses):
                 assert not contains_self_delegation, "should not contain duplicate self delegation"
                 contains_self_delegation = True
         assert contains_self_delegation
+        if curr_epoch == ref_data["last_edit_epoch"]:
+            print(f"\n{COLOR.WARNING}Validator edited/created this epoch{COLOR.ENDC}")
         print(f"\n{'=' * 85}\n")
     return True
 
@@ -375,7 +376,7 @@ def edit_validators(validator_addresses):
         assert txn["transaction-receipt"] is not None
         print(f"{COLOR.OKGREEN}Sent edit validator for "
               f"{address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
-        ref_data["last_epoch"] = curr_epoch
+        ref_data["last_edit_epoch"] = curr_epoch
         ref_data["pub_bls_keys"].append(bls_key["public-key"])
         ref_data["max_total_delegation"] = max_total_delegation
     return True
@@ -430,7 +431,7 @@ def check_delegators(delegator_addresses):
             assert address == delegation["delegator_address"]
             assert delegation["validator_address"] in ref_del_val_addrs
             index = ref_data["validator_addresses"].index(delegation["validator_address"])
-            assert delegation["amount"] == int(ref_data["amounts"][index] * 1e18)
+            assert delegation["amount"] - ref_data["amounts"][index] * 1e18 == 0
             if len(delegation["Undelegations"]) != 0:
                 assert json.dumps(delegation["Undelegations"]) == ref_data["undelegations"][index]
         print(f"\n{'=' * 85}\n")
@@ -487,7 +488,7 @@ def undelegate(validator_addresses, delegator_addresses):
                             print(f"{COLOR.WARNING}WARNING: Undelegation epoch is off by one.{COLOR.ENDC}")
                         assert not undelegation_is_present, "should not see duplicate undelegation"
                         undelegation_is_present = True
-                        assert undelegation["Amount"] == int(d_ref_data["amounts"][index] * 1e18)
+                        assert undelegation["Amount"] - d_ref_data["amounts"][index] * 1e18 == 0
                 assert undelegation_is_present
         assert delegator_is_present
         d_ref_data["amounts"][index] = 0
@@ -553,7 +554,8 @@ def create_single_validator_many_keys(bls_keys_count):
     print(f"{COLOR.OKGREEN}Sent create validator for "
           f"{val_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
     ref_data = {
-        "epoch-created": curr_epoch,
+        "time_created": datetime.datetime.utcnow().strftime(TIMESTAMP_FORMAT),
+        "last_edit_epoch": curr_epoch,
         "pub_bls_keys": [key['public-key'] for key in bls_keys],
         "amount": amount,
         "rate": rate,
@@ -688,50 +690,54 @@ def setup_newman_default(test_json, global_json, env_json):
 
 
 def staking_integration_test():
-    # print(f"{COLOR.UNDERLINE}{COLOR.BOLD} == Running staking integration test == {COLOR.ENDC}")
-    # test_validators = create_simple_validators(validator_count=1)
-    #
-    # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
-    # time.sleep(args.txn_delay)
-    #
-    # check_validators(test_validators)
-    # test_delegators = create_simple_delegators(test_validators)
-    #
-    # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
-    # time.sleep(args.txn_delay)
-    #
-    # check_delegators(test_delegators)
-    # edit_validators(test_validators)
-    #
-    # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
-    # time.sleep(args.txn_delay)
-    #
-    # check_validators(test_validators)
-    # undelegate(test_validators, test_delegators)
-    # check_delegators(test_delegators)
+    print(f"{COLOR.UNDERLINE}{COLOR.BOLD}\n== Running staking integration test =={COLOR.ENDC}")
 
-    # TODO: Check if the bottom code will break Devnet via localnet test.
+    local_return_values = []
+    test_validators = create_simple_validators(validator_count=5)
+    local_return_values.append(test_validators)
+
+    print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
+    time.sleep(args.txn_delay)
+
+    local_return_values.append(check_validators(test_validators))
+    test_delegators = create_simple_delegators(test_validators)
+    local_return_values.append(test_delegators)
+
+    print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
+    time.sleep(args.txn_delay)
+
+    local_return_values.append(check_delegators(test_delegators))
+    local_return_values.append(edit_validators(test_validators))
+
+    print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
+    time.sleep(args.txn_delay)
+
+    local_return_values.append(check_validators(test_validators))
+    local_return_values.append(undelegate(test_validators, test_delegators))
+    local_return_values.append(check_delegators(test_delegators))
     many_keys_validator_singleton = create_single_validator_many_keys(bls_keys_count=5)
+    local_return_values.append(many_keys_validator_singleton)
 
     print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
     time.sleep(args.txn_delay)
 
-    check_validators(many_keys_validator_singleton)
-    edit_validators(many_keys_validator_singleton)
+    local_return_values.append(check_validators(many_keys_validator_singleton))
+    local_return_values.append(edit_validators(many_keys_validator_singleton))
 
     print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
     time.sleep(args.txn_delay)
 
-    check_validators(many_keys_validator_singleton)
+    local_return_values.append(check_validators(many_keys_validator_singleton))
 
     # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
     # time.sleep(args.txn_delay)
-    # collect_rewards(test_delegators)  # TODO: implement logic for separate trigger.
-    return 0  # TODO setup logic to return correct exit code.
+    # collect_rewards(test_delegators)  # TODO: implement collect rewards test.
+    return all(local_return_values)
 
 
 def regression_test():
-    print(f"{COLOR.UNDERLINE}{COLOR.BOLD} == Running regression test == {COLOR.ENDC}")
+    print(f"{COLOR.UNDERLINE}{COLOR.BOLD}\n== Running regression test =={COLOR.ENDC}")
+
     with open(f"{args.test_dir}/test.json", 'r') as f:
         test_json = json.load(f)
     with open(f"{args.test_dir}/global.json", 'r') as f:
@@ -751,18 +757,16 @@ def regression_test():
     with open(f"{args.test_dir}/env.json", 'w') as f:
         json.dump(env_json, f)
 
-    return_code = 0
     for n in range(args.iterations):
         print(f"\n\tIteration {n+1} out of {args.iterations}\n")
         proc = subprocess.Popen(["newman", "run", f"{args.test_dir}/test.json",
                                  "-e", f"{args.test_dir}/env.json",
                                  "-g", f"{args.test_dir}/global.json"])
         proc.wait()
-        return_code = proc.returncode
         if proc.returncode == 0:
             print(f"\n\tSucceeded in {n+1} attempt(s)\n")
-            break
-    return return_code
+            return True
+    return False
 
 
 if __name__ == "__main__":
@@ -771,14 +775,14 @@ if __name__ == "__main__":
     print(f"CLI Version: {CLI.version}")
     assert os.path.isfile(CLI.hmy_binary_path), "CLI binary is not found, specify it with option."
     version_str = re.search('version v.*-', CLI.version).group(0).split('-')[0].replace("version v", "")
-    assert int(version_str) >= 170, "CLI binary is the wrong version."
+    assert int(version_str) >= 183, "CLI binary is the wrong version."
     assert os.path.isdir(args.keys_dir), "Could not find keystore directory"
     assert is_active_shard(args.endpoint_src), "The source shard endpoint is NOT active."
-    # assert is_active_shard(args.endpoint_dst), "The destination shard endpoint is NOT active."
+    assert is_active_shard(args.endpoint_dst), "The destination shard endpoint is NOT active."
     if args.chain_id not in json_load(CLI.single_call("hmy blockchain known-chains")):
         args.chain_id = "testnet"
-    exit_code = 0
 
+    return_values = []
     try:
         load_keys()
 
@@ -787,14 +791,9 @@ if __name__ == "__main__":
             time.sleep(5)
 
         if not args.ignore_staking_test:
-            code = staking_integration_test()
-            if exit_code == 0:
-                exit_code = code
-
+            return_values.append(staking_integration_test())
         if not args.ignore_regression_test:
-            code = regression_test()
-            if exit_code == 0:
-                exit_code = code
+            return_values.append(regression_test())
 
     except (RuntimeError, KeyboardInterrupt) as err:
         print("Removing imported keys from CLI's keystore...")
@@ -805,4 +804,4 @@ if __name__ == "__main__":
     print("Removing imported keys from CLI's keystore...")
     for acc in ACC_NAMES_ADDED:
         CLI.remove_account(acc)
-    sys.exit(exit_code)
+    sys.exit(all(return_values))

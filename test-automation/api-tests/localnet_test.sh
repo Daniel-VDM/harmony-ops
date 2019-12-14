@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
-delay=25
-iters=20
-wait=120
+delay=10
+iters=5
+wait=60
 
 while getopts hw:d:i option
 do 
@@ -56,9 +56,8 @@ python3 -m pip install pyhmy
 
 python3 test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http://localhost:9500/" \
         --rpc_endpoint_dst="http://localhost:9501/" --keystore=./LocalnetValidatorKeys/ \
-        --chain_id="localnet" --delay=${delay} --iterations=${iters} --cli_passphrase='' --ignore_regression_test --debug
+        --chain_id="localnet" --delay=${delay} --iterations=${iters} --cli_passphrase=''
 
-# TODO: change this back for normal local-tests.
-#python3 test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http://localhost:9500/" \
-#        --rpc_endpoint_dst="http://localhost:9501/" --keystore=./LocalnetValidatorKeys/ \
-#        --chain_id="localnet" --delay=${delay} --iterations=${iters} --cli_passphrase='' --ignore_staking_test
+python3 test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http://localhost:9500/" \
+        --rpc_endpoint_dst="http://localhost:9501/" --keystore=./LocalnetValidatorKeys/ \
+        --chain_id="localnet" --delay=${delay} --iterations=${iters} --cli_passphrase='' --ignore_staking_test
