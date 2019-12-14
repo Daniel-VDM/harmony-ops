@@ -5,7 +5,7 @@ delay=25
 iters=20
 wait=120
 
-while getopts hw:i:s option
+while getopts hw:d:i option
 do 
  case "${option}" 
  in
@@ -14,7 +14,7 @@ do
  i) iters=${OPTARG};;
  h) echo "Options:"
     echo ""
-    echo "  Example: ./localnet_test.sh -w 0 -d 30 -i 5 -s"
+    echo "  Example: ./localnet_test.sh -w 0 -d 30 -i 5"
     echo ""
     echo "    -w <int>  Delay (in seconds) before starting the test. Default is 120 seconds."
     echo "    -d <int>  Cx delay (in seconds) between send and check for tests. Default is 30 seconds."
