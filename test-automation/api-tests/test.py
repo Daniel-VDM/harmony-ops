@@ -143,7 +143,6 @@ def fund_account(from_account_name, to_account_name, amount):
         print(f"{json.dumps(get_balance(to_account_name, args.endpoint_src), indent=4)}\n")
 
 
-# TODO: update BLS key logic to match CLI.
 @test
 def create_simple_validators(validator_count):
     """
@@ -693,7 +692,7 @@ def staking_integration_test():
     print(f"{COLOR.UNDERLINE}{COLOR.BOLD}\n== Running staking integration test =={COLOR.ENDC}")
 
     local_return_values = []
-    test_validators = create_simple_validators(validator_count=5)
+    test_validators = create_simple_validators(validator_count=3)
     local_return_values.append(test_validators)
 
     print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
