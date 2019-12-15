@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
 delay=10
 iters=5
 wait=60
@@ -54,10 +56,10 @@ sleep $wait
 python3 -m pip install requests
 python3 -m pip install pyhmy
 
-python3 test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http://localhost:9500/" \
+python3 ${DIR}/test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http://localhost:9500/" \
         --rpc_endpoint_dst="http://localhost:9501/" --keystore=./LocalnetValidatorKeys/ \
         --chain_id="localnet" --delay=${delay} --iterations=${iters} --cli_passphrase=''
 
-python3 test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http://localhost:9500/" \
+python3 ${DIR}/test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http://localhost:9500/" \
         --rpc_endpoint_dst="http://localhost:9501/" --keystore=./LocalnetValidatorKeys/ \
         --chain_id="localnet" --delay=${delay} --iterations=${iters} --cli_passphrase='' --ignore_staking_test
