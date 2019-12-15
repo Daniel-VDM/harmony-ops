@@ -60,6 +60,8 @@ python3 ${DIR}/test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http:
         --rpc_endpoint_dst="http://localhost:9501/" --keystore=./LocalnetValidatorKeys/ \
         --chain_id="localnet" --delay=${delay} --iterations=${iters} --cli_passphrase=''
 
-python3 ${DIR}/test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http://localhost:9500/" \
-        --rpc_endpoint_dst="http://localhost:9501/" --keystore=./LocalnetValidatorKeys/ \
+printf "\nTesting cross-shard transaction from S1 to S0\n"
+
+python3 ${DIR}/test.py --test_dir=./tests/no-explorer/ --rpc_endpoint_src="http://localhost:9501/" \
+        --rpc_endpoint_dst="http://localhost:9500/" --keystore=./LocalnetValidatorKeys/ \
         --chain_id="localnet" --delay=${delay} --iterations=${iters} --cli_passphrase='' --ignore_staking_test
