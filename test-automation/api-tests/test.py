@@ -15,8 +15,9 @@ from utils import *
 ACC_NAMES_ADDED = []
 ACC_NAME_PREFIX = "_Test_key_"
 
+
 def parse_args():
-    parser = argparse.ArgumentParser(description='Wrapper python script to test API using newman.')
+    parser = argparse.ArgumentParser(description='Python script to test the Harmony blockchain using the hmy CLI.')
     parser.add_argument("--test_dir", dest="test_dir", default="./tests/default",
                         help="Path to test directory. Default is './tests/default'", type=str)
     parser.add_argument("--iterations", dest="iterations", default=5,
@@ -58,8 +59,11 @@ def parse_args():
     return parser.parse_args()
 
 
-def get_balance(name, node):
-    address = CLI.get_address(name)
+def get_balance(node, name=None, address=None):
+    assert name or address, "Must provide a keystore name or address"
+    if not address:
+        address = CLI.get_address(name=name)
+    assert address is not None and address.startswith("one1")
     return json_load(CLI.single_call(f"hmy --node={node} balances {address}")) if address else []
 
 
@@ -70,6 +74,8 @@ def add_key(name):
     proc.expect("Repeat the passphrase:\r\n")
     proc.sendline(f"{args.passphrase}")
     proc.wait()
+    if args.debug:
+        print(f"Added account key with name: {name}")
     ACC_NAMES_ADDED.append(name)
 
 
@@ -78,7 +84,7 @@ def get_faucet_account(min_funds):
     Only looks for accounts that have funds on shard 0.
     """
     for acc_name in ACC_NAMES_ADDED:
-        if float(get_balance(acc_name, args.endpoint_src)[0]["amount"]) > min_funds:
+        if float(get_balance(args.endpoint_src, name=acc_name)[0]["amount"]) >= min_funds:
             return acc_name
     raise RuntimeError(f"None of the loaded accounts have at least {min_funds} on shard 0")
 
@@ -93,8 +99,10 @@ def bls_generator(count, key_dir="/tmp", filter_fn=None):
 
     for i in range(count):
         while True:
-            proc = CLI.expect_call(f"hmy keys generate-bls-key --bls-file-path {key_dir}/{ACC_NAME_PREFIX}bls{i}.key",
-                                   timeout=3)
+            if os.path.exists(f"{key_dir}/{ACC_NAME_PREFIX}bls{i}.key") and args.debug:
+                print(f"{COLOR.WARNING}Overriding BLS key file at: {key_dir}/{ACC_NAME_PREFIX}bls{i}.key {COLOR.ENDC}")
+            proc = CLI.expect_call(f"hmy keys generate-bls-key --bls-file-path "
+                                   f"{key_dir}/{ACC_NAME_PREFIX}bls{i}.key", timeout=3)
             proc.expect("Enter passphrase:\r\n")
             proc.sendline(f"{args.passphrase}")
             proc.expect("Repeat the passphrase:\r\n")
@@ -102,6 +110,8 @@ def bls_generator(count, key_dir="/tmp", filter_fn=None):
             bls_key = json_load(proc.read().decode().strip())
             if filter_fn is None or filter_fn(bls_key):
                 break
+        if args.debug:
+            print(f"Generated BLS key:\n{json.dumps(bls_key, indent=4)}")
         yield bls_key
 
 
@@ -140,8 +150,8 @@ def fund_account(from_account_name, to_account_name, amount):
                     f"--from-shard 0 --to-shard 0 --amount {amount} --chain-id {args.chain_id} "
                     f"--passphrase={args.passphrase} --wait-for-confirm=45", timeout=45)
     if args.debug:
-        print(f"{COLOR.OKGREEN}Balances for {to_account_name} ({to_address}):{COLOR.ENDC}")
-        print(f"{json.dumps(get_balance(to_account_name, args.endpoint_src), indent=4)}\n")
+        print(f"Balances for {to_account_name} ({to_address}):")
+        print(f"{json.dumps(get_balance(args.endpoint_src, name=to_account_name), indent=4)}\n")
 
 
 # TODO: Staking test where you send Cx and Tx to and from delegator and validator. Txns from other validators,
@@ -155,6 +165,8 @@ def create_simple_validators(validator_count):
 
     Note that each staking test assumes that the reference data will be updated (if necessary)
     as it is the single source of truth.
+
+    TODO: Verify transaction-receipt
     """
     endpoint = get_endpoint(0, args.endpoint_src)
     amount = 3  # Must be > 1 b/c of min-self-delegation
@@ -216,7 +228,9 @@ def create_custom_validators():
     Similar to create_simple_validators except we are using acc keys + BLS keys from main repo.
 
     Note that this assumes that the keystore of the CLI has the appropriate keys and that the
-    given passphrase can unlock it.
+    given passphrase can unlock it. BLS keys will
+
+    TODO: Verify transaction-receipt
     """
     main_repo_accs = [
         ("one1ghkz3frhske7emk79p7v2afmj4a5t0kmjyt4s5",
@@ -251,7 +265,7 @@ def create_custom_validators():
         if not val_names:
             continue
         val_name = list(filter(lambda s: s.startswith(ACC_NAME_PREFIX), val_names))[0]
-        if float(get_balance(val_name, endpoint)[0]["amount"]) < amount + 1:
+        if float(get_balance(endpoint, name=val_name)[0]["amount"]) < amount + 1:
             fund_account(faucet_acc_name, val_name, amount + 1)  # +1 for gas overhead.
         key_path = f"{gopath}/src/github.com/harmony-one/harmony/.hmy/{key}.key"
         assert os.path.isfile(key_path)
@@ -299,6 +313,9 @@ def create_custom_validators():
 
 @test
 def check_validators(validator_addresses):
+    """
+    This test checks the validator against their respective reference data.
+    """
     endpoint = get_endpoint(0, args.endpoint_src)
     all_val = json_load(CLI.single_call(f"hmy --node={endpoint} blockchain validator all"))
     assert all_val["result"] is not None
@@ -355,6 +372,12 @@ def check_validators(validator_addresses):
 
 @test
 def edit_validators(validator_addresses):
+    """
+    This test edits all validators that it is given.
+
+    TODO: Create test to add / remove multiple BLS keys.
+    TODO: Verify transaction-receipt
+    """
     endpoint = get_endpoint(0, args.endpoint_src)
     for (address, ref_data), bls_key in zip(validator_addresses.items(),
                                             bls_generator(len(validator_addresses.keys()), key_dir="/tmp/edit_val")):
@@ -387,6 +410,12 @@ def edit_validators(validator_addresses):
 
 @test
 def create_simple_delegators(validator_addresses):
+    """
+    This test creates delegators that only delegate to 1 (unique) given validator.
+
+    TODO: create more 'complex' delegators test.
+    TODO: Verify transaction-receipt
+    """
     delegator_addresses = {}
     endpoint = get_endpoint(0, args.endpoint_src)
     for i, (validator_address, data) in enumerate(validator_addresses.items()):
@@ -418,6 +447,9 @@ def create_simple_delegators(validator_addresses):
 
 @test
 def check_delegators(delegator_addresses):
+    """
+    This test checks the delegators against their respective reference data.
+    """
     endpoint = get_endpoint(0, args.endpoint_src)
     for address, ref_data in delegator_addresses.items():
         print(f"\n{'=' * 85}\n")
@@ -443,59 +475,73 @@ def check_delegators(delegator_addresses):
 
 @test
 def undelegate(validator_addresses, delegator_addresses):
-    undelegation_epochs = []
+    """
+    This test undelegates all from their respective validators.
+
+    TODO: verify that this test works as intended with 'complex' delegators
+    """
+    undelegation_epochs = {}  # Format: (d_addr, v_addr): epoch
     endpoint = get_endpoint(0, args.endpoint_src)
-    iterable = zip(validator_addresses.items(), delegator_addresses.items())
-    for (v_address, v_ref_data), (d_address, d_ref_data) in iterable:
-        assert v_address in d_ref_data["validator_addresses"]
-        index = d_ref_data["validator_addresses"].index(v_address)
-        amount = d_ref_data["amounts"][index]
-        undelegation_epochs.append(get_current_epoch(endpoint))
-        txn = json_load(CLI.single_call(f"hmy staking undelegate --validator-addr {v_address} "
-                                        f"--delegator-addr {d_address} --amount {amount} "
-                                        f"--node={endpoint} "
-                                        f"--chain-id={args.chain_id} --passphrase={args.passphrase}"))
-        assert "transaction-receipt" in txn.keys()
-        assert txn["transaction-receipt"] is not None
-        print(f"{COLOR.OKGREEN}Sent undelegate {d_address} from "
-              f"{v_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
+
+    for d_address, d_ref_data in delegator_addresses.items():
+        for v_address in d_ref_data["validator_addresses"]:
+            if v_address not in validator_addresses.keys():
+                if args.debug:
+                    print(f"{COLOR.WARNING}Reference data for validator: {v_address} not found, skipping.{COLOR.ENDC}")
+                continue
+            index = d_ref_data["validator_addresses"].index(v_address)
+            amount = d_ref_data["amounts"][index]
+            undelegation_epochs[(d_address, v_address)] = get_current_epoch(endpoint)
+            txn = json_load(CLI.single_call(f"hmy staking undelegate --validator-addr {v_address} "
+                                            f"--delegator-addr {d_address} --amount {amount} "
+                                            f"--node={endpoint} "
+                                            f"--chain-id={args.chain_id} --passphrase={args.passphrase}"))
+            assert "transaction-receipt" in txn.keys()
+            assert txn["transaction-receipt"] is not None
+            print(f"{COLOR.OKGREEN}Sent undelegate {d_address} from "
+                  f"{v_address}:{COLOR.ENDC}\n{json.dumps(txn, indent=4)}\n")
 
     print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}\n")
     time.sleep(args.txn_delay)
 
     print(f"{COLOR.OKBLUE}{COLOR.BOLD}Verifying undelegations{COLOR.ENDC}\n")
-    iterable = enumerate(zip(validator_addresses.items(), delegator_addresses.items()))
-    for i, ((v_address, v_ref_data), (d_address, d_ref_data)) in iterable:
-        print(f"\n{'=' * 85}\n")
-        print(f"{COLOR.HEADER}Validator address: {v_address}{COLOR.ENDC}")
-        print(f"{COLOR.HEADER}Delegator address: {d_address}{COLOR.ENDC}")
-        index = d_ref_data["validator_addresses"].index(v_address)
-        val_info = json_load(CLI.single_call(f"hmy blockchain delegation by-validator {v_address} "
-                                             f"--node={endpoint}"))
-        assert val_info["result"] is not None
-        print(f"{COLOR.OKGREEN}Validator information:{COLOR.ENDC}\n{json.dumps(val_info, indent=4)}")
-        if args.debug:
-            print(f"Reference data for (validator) {v_address}: {json.dumps(v_ref_data, indent=4)}")
-            print(f"Reference data for (delegator) {d_address}: {json.dumps(d_ref_data, indent=4)}")
-        delegator_is_present = False
-        for delegation in val_info["result"]:
-            if d_address == delegation["delegator_address"]:
-                assert not delegator_is_present, "should not see same delegator twice"
-                delegator_is_present = True
-                assert len(delegation["Undelegations"]) >= 1
-                d_ref_data["undelegations"][index] = json.dumps(delegation["Undelegations"])
-                undelegation_is_present = False
-                for undelegation in delegation["Undelegations"]:
-                    if 0 <= abs(undelegation["Epoch"] - undelegation_epochs[i]) <= 1:
-                        if undelegation["Epoch"] != undelegation_epochs[i]:
-                            print(f"{COLOR.WARNING}WARNING: Undelegation epoch is off by one.{COLOR.ENDC}")
-                        assert not undelegation_is_present, "should not see duplicate undelegation"
-                        undelegation_is_present = True
-                        assert undelegation["Amount"] - d_ref_data["amounts"][index] * 1e18 == 0
-                assert undelegation_is_present
-        assert delegator_is_present
-        d_ref_data["amounts"][index] = 0
-        print(f"\n{'=' * 85}\n")
+    for d_address, d_ref_data in delegator_addresses.items():
+        for v_address in d_ref_data["validator_addresses"]:
+            if v_address not in validator_addresses.keys():
+                if args.debug:
+                    print(f"{COLOR.WARNING}Reference data for validator: {v_address} not found, skipping.{COLOR.ENDC}")
+                continue
+            v_ref_data = validator_addresses[v_address]
+            print(f"\n{'=' * 85}\n")
+            print(f"{COLOR.HEADER}Validator address: {v_address}{COLOR.ENDC}")
+            print(f"{COLOR.HEADER}Delegator address: {d_address}{COLOR.ENDC}")
+            index = d_ref_data["validator_addresses"].index(v_address)
+            val_info = json_load(CLI.single_call(f"hmy blockchain delegation by-validator {v_address} "
+                                                 f"--node={endpoint}"))
+            assert val_info["result"] is not None
+            print(f"{COLOR.OKGREEN}Validator information:{COLOR.ENDC}\n{json.dumps(val_info, indent=4)}")
+            if args.debug:
+                print(f"Reference data for (validator) {v_address}: {json.dumps(v_ref_data, indent=4)}")
+                print(f"Reference data for (delegator) {d_address}: {json.dumps(d_ref_data, indent=4)}")
+            delegator_is_present = False
+            for delegation in val_info["result"]:
+                if d_address == delegation["delegator_address"]:
+                    assert not delegator_is_present, "should not see same delegator twice"
+                    delegator_is_present = True
+                    assert len(delegation["Undelegations"]) >= 1
+                    d_ref_data["undelegations"][index] = json.dumps(delegation["Undelegations"])
+                    undelegation_is_present = False
+                    for undelegation in delegation["Undelegations"]:
+                        if 0 <= abs(undelegation["Epoch"] - undelegation_epochs[(d_address, v_address)]) <= 1:
+                            if undelegation["Epoch"] != undelegation_epochs[(d_address, v_address)]:
+                                print(f"{COLOR.WARNING}WARNING: Undelegation epoch is off by one.{COLOR.ENDC}")
+                            assert not undelegation_is_present, "should not see duplicate undelegation"
+                            undelegation_is_present = True
+                            assert undelegation["Amount"] - d_ref_data["amounts"][index] * 1e18 == 0
+                    assert undelegation_is_present
+            assert delegator_is_present
+            d_ref_data["amounts"][index] = 0
+            print(f"\n{'=' * 85}\n")
     return True
 
 
@@ -516,7 +562,10 @@ def collect_rewards(address):
 @test
 def create_single_validator_many_keys(bls_keys_count):
     """
-    Assumes that the CLI asks for the BLS key files in the order of the bls_key_string.
+    This test creates 1 validator with multiple BLS keys.
+    It assumes that the CLI asks for the BLS key files in the order of the bls_key_string.
+
+    TODO: Verify transaction-receipt
     """
     endpoint = get_endpoint(0, args.endpoint_src)
     amount = 2  # Must be > 1 b/c of min-self-delegation
@@ -581,7 +630,7 @@ def get_raw_cx(passphrase, chain_id, node, src_shard, dst_shard):
     """
     assert len(ACC_NAMES_ADDED) > 1, "Must load at least 2 keys and must match CLI's keystore format"
     for acc_name in ACC_NAMES_ADDED:
-        balances = get_balance(acc_name, node)
+        balances = get_balance(node, name=acc_name)
         from_addr = CLI.get_address(acc_name)
         to_addr_candidates = ACC_NAMES_ADDED.copy()
         to_addr_candidates.remove(acc_name)
@@ -609,9 +658,11 @@ def setup_newman_no_explorer(test_json, global_json, env_json):
                          node=args.endpoint_src, src_shard=source_shard, dst_shard=destination_shard)
 
     if str(source_shard) not in args.endpoint_src:
-        print(f"Source shard {source_shard} may not match source endpoint {args.endpoint_src}")
+        print(f"{COLOR.WARNING}Source shard {source_shard} may not match "
+              f"source endpoint {args.endpoint_src}{COLOR.ENDC}")
     if str(destination_shard) not in args.endpoint_dst:
-        print(f"Destination shard {destination_shard} may not match destination endpoint {args.endpoint_dst}")
+        print(f"{COLOR.WARNING}Destination shard {destination_shard} may not match "
+              f"destination endpoint {args.endpoint_dst}{COLOR.ENDC}")
 
     for i, var in enumerate(env_json["values"]):
         if var["key"] == "rawTransaction":
@@ -637,9 +688,11 @@ def setup_newman_only_explorer(test_json, global_json, env_json):
                          node=args.endpoint_src, src_shard=source_shard, dst_shard=destination_shard)
 
     if str(source_shard) not in args.endpoint_src:
-        print(f"Source shard {source_shard} may not match source endpoint {args.endpoint_src}")
+        print(f"{COLOR.WARNING}Source shard {source_shard} may not match "
+              f"source endpoint {args.endpoint_src}{COLOR.ENDC}")
     if str(destination_shard) not in args.endpoint_dst:
-        print(f"Destination shard {destination_shard} may not match destination endpoint {args.endpoint_dst}")
+        print(f"{COLOR.WARNING}Destination shard {destination_shard} may not match "
+              f"destination endpoint {args.endpoint_dst}{COLOR.ENDC}")
 
     for i, var in enumerate(env_json["values"]):
         if var["key"] == "rawTransaction":
@@ -669,9 +722,11 @@ def setup_newman_default(test_json, global_json, env_json):
                          node=args.endpoint_src, src_shard=source_shard, dst_shard=destination_shard)
 
     if str(source_shard) not in args.endpoint_src:
-        print(f"Source shard {source_shard} may not match source endpoint {args.endpoint_src}")
+        print(f"{COLOR.WARNING}Source shard {source_shard} may not match "
+              f"source endpoint {args.endpoint_src}{COLOR.ENDC}")
     if str(destination_shard) not in args.endpoint_dst:
-        print(f"Destination shard {destination_shard} may not match destination endpoint {args.endpoint_dst}")
+        print(f"{COLOR.WARNING}Destination shard {destination_shard} may not match "
+              f"destination endpoint {args.endpoint_dst}{COLOR.ENDC}")
 
     for i, var in enumerate(env_json["values"]):
         if var["key"] == "rawTransaction":
@@ -810,18 +865,19 @@ if __name__ == "__main__":
                 time.sleep(5)
                 current_epoch = get_current_epoch(s0_endpoint)
             test_results["Staking integration test"] = staking_integration_test()
-            print(f"{COLOR.OKBLUE}Doing regression test after staking epoch...{COLOR.ENDC}")
+            print(f"{COLOR.OKGREEN}Doing regression test after staking epoch...{COLOR.ENDC}")
             test_results["Post-staking epoch regression test"] = regression_test()
 
-    except (RuntimeError, KeyboardInterrupt) as err:
+    except (RuntimeError, KeyboardInterrupt) as e:
         print("Removing imported keys from CLI's keystore...")
         for acc in ACC_NAMES_ADDED:
             CLI.remove_account(acc)
-        raise err
+        raise e from e
 
     print("Removing imported keys from CLI's keystore...")
     for acc in ACC_NAMES_ADDED:
         CLI.remove_account(acc)
-    print(f"{COLOR.HEADER}{COLOR.BOLD}Test Results{COLOR.ENDC}")
+    print(f"{COLOR.HEADER}{COLOR.BOLD}Test Results:")
     print(json.dumps(test_results, indent=4))
+    print(COLOR.ENDC)
     sys.exit(all(test_results.values()))

@@ -2,6 +2,7 @@
 
 Related internal [gitbook](https://app.gitbook.com/@harmony-one/s/onboarding-wiki/developers/api-test-automation)
 
+- Make sure that you have set-up the development environment for the main harmony repo. If not, follow the main repo's README [here](https://github.com/harmony-one/harmony/blob/master/README.md).
 - Make sure newman (and by extension node.js) is installed, do `npm install -g newman` (https://www.npmjs.com/package/newman)
 - Make sure that you are using python 3.
 - Make sure that you have `pyhmy` module for python3 [here](https://pypi.org/project/pyhmy/). You can install it with the following command `python3 -m install pyhmy`.
@@ -25,8 +26,8 @@ Make sure that the keystore follows the follow structure:
 > The included `LocalnetValidatorKeys` directory should suffice for localnet testing.
 
 ## Running the test
-For localnet, one can just execute the `localnet_test.sh` script to run the appropriate tests. Note that this script
-is what the main repo's Jenkins PR job calls to run the tests. 
+For localnet, one can just execute the `localnet_test.sh` script to run all of the tests. Note that this script
+is what the main repo's Jenkins PR job uses to run the tests. 
 ```bash
 chmod +x ./localnet_test.sh
 ./localnet_test.sh -w 60 -d 20 -i 5
@@ -132,8 +133,10 @@ optional arguments:
 
 ## Adding tests
 
-### Regression tests using newman
-To run your own postman / `newman` collection (or an updated version of the collection above) export the collection, global variables, and environment variables to `<test_dir>/test.json`, `<test_dir>/global.json`, and `<test_dir>/env.json` respectively. For more details on how to export a test, reference [here](https://kb.datamotion.com/?ht_kb=postman-instructions-for-exporting-and-importing#how-to-export-a-collection-from-postman). For more details on how to export global variables, reference [here](https://learning.getpostman.com/docs/postman/environments_and_globals/manage_globals/). For more details on how to export environment variables, reference [here](https://learning.getpostman.com/docs/postman/environments_and_globals/manage_environments/)
+### Postman collection tests using newman
+To run your own postman / `newman` collection (or an updated version of the regression test collection) export the collection, global variables, and environment variables to `<test_dir>/test.json`, `<test_dir>/global.json`, and `<test_dir>/env.json` respectively. For more details on how to export a test, reference [here](https://kb.datamotion.com/?ht_kb=postman-instructions-for-exporting-and-importing#how-to-export-a-collection-from-postman). For more details on how to export global variables, reference [here](https://learning.getpostman.com/docs/postman/environments_and_globals/manage_globals/). For more details on how to export environment variables, reference [here](https://learning.getpostman.com/docs/postman/environments_and_globals/manage_environments/)
+
+To add a new collection to be ran by newman, just create a directory that looks like `./tests/default/` and specify it as the `--test_dir` option. **Make sure to also code up the variable setup in the python script**. Reference the `regression_test` function for an example. 
 
 ### Integration tests using hmy CLI & python
 Integration tests (like the staking tests) are currently written in `test.py` and use the `pyhmy.HmyCLI` object to do most of the blockchain interaction. Moreover, `utils.py` provide common functions that are used in multiple tests.   
