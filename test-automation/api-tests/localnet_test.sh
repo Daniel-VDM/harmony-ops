@@ -34,24 +34,24 @@ do
     sleep 3
 done
 
+echo "Waiting for localnet to boot..."
 valid=false
-until $valid
+until ${valid}
 do
-    result=$(curl --silent --location --request POST "localhost:9500" \
-        --header "Content-Type: application/json" \
-        --data '{"jsonrpc":"2.0","method":"hmy_blockNumber","params":[],"id":1}' \
-         | jq '.result')
-    if [ "$result" = "\"0x0\"" ]; then
-        echo "Waiting for localnet to boot..."
-        sleep 3
-    else
-        valid=true
-    fi
+   result=$(curl --silent --location --request POST "localhost:9500" \
+       --header "Content-Type: application/json" \
+       --data '{"jsonrpc":"2.0","method":"hmy_blockNumber","params":[],"id":1}' \
+        | jq '.result')
+   if [[ "$result" = "\"0x0\"" ]]; then
+       sleep 3
+   else
+       valid=true
+   fi
 done
+echo "Localnet booted..."
 
-echo "Localnet booted."
 echo "Sleeping ${wait} seconds to generate some funds..."
-sleep $wait
+sleep ${wait}
 
 python3 -m pip install requests
 python3 -m pip install pyhmy

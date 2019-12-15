@@ -48,8 +48,8 @@ def parse_args():
     parser.add_argument("--keystore", dest="keys_dir", default="TestnetValidatorKeys",
                         help=f"Directory of keystore to import. Must follow the format of CLI's keystore. "
                              f"Default is ./TestnetValidatorKeys", type=str)
-    parser.add_argument("--staking_epoch", dest="staking_epoch", default=3,
-                        help=f"The epoch to start the staking integration tests. Default is 3.", type=int)
+    parser.add_argument("--staking_epoch", dest="staking_epoch", default=4,
+                        help=f"The epoch to start the staking integration tests. Default is 4.", type=int)
     parser.add_argument("--ignore_regression_test", dest="ignore_regression_test", action='store_true', default=False,
                         help="Disable the regression tests.")
     parser.add_argument("--ignore_staking_test", dest="ignore_staking_test", action='store_true', default=False,
