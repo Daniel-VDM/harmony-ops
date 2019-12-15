@@ -586,7 +586,7 @@ def get_raw_cx(passphrase, chain_id, node, src_shard, dst_shard):
         to_addr = CLI.get_address(random.choice(to_addr_candidates))
         if balances[src_shard]["amount"] >= 5:  # Ensure enough funds (even with high gas fees).
             print(f"Raw transaction details:\n"
-                  f"\tNode: {node}\n")
+                  f"\tNode: {node}")
             response = CLI.single_call(f"hmy --node={node} transfer --from={from_addr} --to={to_addr} "
                                        f"--from-shard={src_shard} --to-shard={dst_shard} --amount={1e-9} "
                                        f"--chain-id={chain_id} --dry-run --passphrase={passphrase}")
