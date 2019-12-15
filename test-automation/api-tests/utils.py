@@ -165,5 +165,6 @@ def test(fn):
             print(f"{COLOR.FAIL}Exception:{e}\n")
             traceback.print_exc()
             print(COLOR.ENDC)
+            return False
 
     return wrap

@@ -22,8 +22,8 @@ def parse_args():
                         help="Path to test directory. Default is './tests/default'", type=str)
     parser.add_argument("--iterations", dest="iterations", default=5,
                         help="Number of attempts for a successful test. Default is 5.", type=int)
-    parser.add_argument("--start_epoch", dest="start_epoch", default=1,
-                        help="The minimum epoch before starting tests. Default is 1.", type=int)
+    parser.add_argument("--start_epoch", dest="start_epoch", default=0,
+                        help="The minimum epoch before starting tests. Default is 0.", type=int)
     parser.add_argument("--rpc_endpoint_src", dest="endpoint_src", default="https://api.s0.b.hmny.io/",
                         help="Source endpoint for Cx. Default is https://api.s0.b.hmny.io/", type=str)
     parser.add_argument("--rpc_endpoint_dst", dest="endpoint_dst", default="https://api.s1.b.hmny.io/",
@@ -48,6 +48,8 @@ def parse_args():
     parser.add_argument("--keystore", dest="keys_dir", default="TestnetValidatorKeys",
                         help=f"Directory of keystore to import. Must follow the format of CLI's keystore. "
                              f"Default is ./TestnetValidatorKeys", type=str)
+    parser.add_argument("--staking_epoch", dest="staking_epoch", default=3,
+                        help=f"The epoch to start the staking integration tests. Default is 3.", type=int)
     parser.add_argument("--ignore_regression_test", dest="ignore_regression_test", action='store_true', default=False,
                         help="Disable the regression tests.")
     parser.add_argument("--ignore_staking_test", dest="ignore_staking_test", action='store_true', default=False,
@@ -689,7 +691,7 @@ def setup_newman_default(test_json, global_json, env_json):
 
 
 def staking_integration_test():
-    print(f"{COLOR.UNDERLINE}{COLOR.BOLD}\n== Running staking integration test =={COLOR.ENDC}")
+    print(f"{COLOR.UNDERLINE}{COLOR.BOLD}== Running staking integration test =={COLOR.ENDC}")
 
     local_return_values = []
     test_validators = create_simple_validators(validator_count=3)
@@ -731,11 +733,15 @@ def staking_integration_test():
     # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
     # time.sleep(args.txn_delay)
     # collect_rewards(test_delegators)  # TODO: implement collect rewards test.
-    return all(local_return_values)
+    if all(local_return_values):
+        print(f"\n{COLOR.OKGREEN}Passed{COLOR.ENDC} {COLOR.UNDERLINE}Staking Integration Test{COLOR.ENDC}\n")
+        return True
+    print(f"\n{COLOR.FAIL}FAILED{COLOR.ENDC} {COLOR.UNDERLINE}Staking Integration Test{COLOR.ENDC}\n")
+    return False
 
 
 def regression_test():
-    print(f"{COLOR.UNDERLINE}{COLOR.BOLD}\n== Running regression test =={COLOR.ENDC}")
+    print(f"{COLOR.UNDERLINE}{COLOR.BOLD}== Running regression test =={COLOR.ENDC}")
 
     with open(f"{args.test_dir}/test.json", 'r') as f:
         test_json = json.load(f)
@@ -763,8 +769,10 @@ def regression_test():
                                  "-g", f"{args.test_dir}/global.json"])
         proc.wait()
         if proc.returncode == 0:
-            print(f"\n\tSucceeded in {n+1} attempt(s)\n")
+            print(f"\n{COLOR.OKGREEN}Passed{COLOR.ENDC} {COLOR.UNDERLINE}Regression Test{COLOR.ENDC}"
+                  f" in {n+1} attempt(s)\n")
             return True
+    print(f"\n{COLOR.FAIL}FAILED{COLOR.ENDC} {COLOR.UNDERLINE}Regression Test{COLOR.ENDC}\n")
     return False
 
 
@@ -781,7 +789,7 @@ if __name__ == "__main__":
     if args.chain_id not in json_load(CLI.single_call("hmy blockchain known-chains")):
         args.chain_id = "testnet"
 
-    return_values = []
+    test_results = {}
     try:
         load_keys()
 
@@ -789,10 +797,20 @@ if __name__ == "__main__":
         while not is_after_epoch(args.start_epoch - 1, args.endpoint_src):
             time.sleep(5)
 
-        if not args.ignore_staking_test:
-            return_values.append(staking_integration_test())
         if not args.ignore_regression_test:
-            return_values.append(regression_test())
+            test_results["Pre-staking epoch regression test"] = regression_test()
+
+        if not args.ignore_staking_test:
+            endpoint = get_endpoint(shard_number=0, endpoint=args.endpoint_src)
+            current_epoch = get_current_epoch(endpoint)
+            while current_epoch < args.staking_epoch:
+                print(f"Waiting for staking epoch ({args.staking_epoch}) currently epoch {current_epoch}")
+                time.sleep(5)
+                current_epoch = get_current_epoch(endpoint)
+            test_results["Staking integration test"] = staking_integration_test()
+            if not args.ignore_regression_test:
+                print(f"{COLOR.OKBLUE}Doing regression test after staking epoch...{COLOR.ENDC}")
+                test_results["Post-staking epoch regression test"] = regression_test()
 
     except (RuntimeError, KeyboardInterrupt) as err:
         print("Removing imported keys from CLI's keystore...")
@@ -803,4 +821,6 @@ if __name__ == "__main__":
     print("Removing imported keys from CLI's keystore...")
     for acc in ACC_NAMES_ADDED:
         CLI.remove_account(acc)
-    sys.exit(all(return_values))
+    print(f"{COLOR.HEADER}{COLOR.BOLD}Test Results{COLOR.ENDC}")
+    print(json.dumps(test_results, indent=4))
+    sys.exit(all(test_results.values()))
