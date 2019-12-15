@@ -15,7 +15,6 @@ from utils import *
 ACC_NAMES_ADDED = []
 ACC_NAME_PREFIX = "_Test_key_"
 
-
 def parse_args():
     parser = argparse.ArgumentParser(description='Wrapper python script to test API using newman.')
     parser.add_argument("--test_dir", dest="test_dir", default="./tests/default",
@@ -145,6 +144,9 @@ def fund_account(from_account_name, to_account_name, amount):
         print(f"{json.dumps(get_balance(to_account_name, args.endpoint_src), indent=4)}\n")
 
 
+# TODO: Staking test where you send Cx and Tx to and from delegator and validator. Txns from other validators,
+#       delegators, and regular transaction. Also make sure to do it before and after undelegation
+# TODO: Undelegation test and collect rewards test.
 @test
 def create_simple_validators(validator_count):
     """
@@ -808,9 +810,8 @@ if __name__ == "__main__":
                 time.sleep(5)
                 current_epoch = get_current_epoch(s0_endpoint)
             test_results["Staking integration test"] = staking_integration_test()
-            if not args.ignore_regression_test:
-                print(f"{COLOR.OKBLUE}Doing regression test after staking epoch...{COLOR.ENDC}")
-                test_results["Post-staking epoch regression test"] = regression_test()
+            print(f"{COLOR.OKBLUE}Doing regression test after staking epoch...{COLOR.ENDC}")
+            test_results["Post-staking epoch regression test"] = regression_test()
 
     except (RuntimeError, KeyboardInterrupt) as err:
         print("Removing imported keys from CLI's keystore...")
