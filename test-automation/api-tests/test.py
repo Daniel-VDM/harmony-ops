@@ -801,12 +801,12 @@ if __name__ == "__main__":
             test_results["Pre-staking epoch regression test"] = regression_test()
 
         if not args.ignore_staking_test:
-            endpoint = get_endpoint(shard_number=0, endpoint=args.endpoint_src)
-            current_epoch = get_current_epoch(endpoint)
+            s0_endpoint = get_endpoint(shard_number=0, endpoint=args.endpoint_src)
+            current_epoch = get_current_epoch(s0_endpoint)
             while current_epoch < args.staking_epoch:
                 print(f"Waiting for staking epoch ({args.staking_epoch}) currently epoch {current_epoch}")
                 time.sleep(5)
-                current_epoch = get_current_epoch(endpoint)
+                current_epoch = get_current_epoch(s0_endpoint)
             test_results["Staking integration test"] = staking_integration_test()
             if not args.ignore_regression_test:
                 print(f"{COLOR.OKBLUE}Doing regression test after staking epoch...{COLOR.ENDC}")
