@@ -22,8 +22,8 @@ def parse_args():
                         help="Path to test directory. Default is './tests/default'", type=str)
     parser.add_argument("--iterations", dest="iterations", default=5,
                         help="Number of attempts for a successful test. Default is 5.", type=int)
-    parser.add_argument("--start_epoch", dest="start_epoch", default=0,
-                        help="The minimum epoch before starting tests. Default is 0.", type=int)
+    parser.add_argument("--start_epoch", dest="start_epoch", default=1,
+                        help="The minimum epoch before starting tests. Default is 1.", type=int)
     parser.add_argument("--rpc_endpoint_src", dest="endpoint_src", default="https://api.s0.b.hmny.io/",
                         help="Source endpoint for Cx. Default is https://api.s0.b.hmny.io/", type=str)
     parser.add_argument("--rpc_endpoint_dst", dest="endpoint_dst", default="https://api.s1.b.hmny.io/",
@@ -448,11 +448,11 @@ def undelegate(validator_addresses, delegator_addresses):
         assert v_address in d_ref_data["validator_addresses"]
         index = d_ref_data["validator_addresses"].index(v_address)
         amount = d_ref_data["amounts"][index]
+        undelegation_epochs.append(get_current_epoch(endpoint))
         txn = json_load(CLI.single_call(f"hmy staking undelegate --validator-addr {v_address} "
                                         f"--delegator-addr {d_address} --amount {amount} "
                                         f"--node={endpoint} "
                                         f"--chain-id={args.chain_id} --passphrase={args.passphrase}"))
-        undelegation_epochs.append(get_current_epoch(endpoint))
         assert "transaction-receipt" in txn.keys()
         assert txn["transaction-receipt"] is not None
         print(f"{COLOR.OKGREEN}Sent undelegate {d_address} from "
