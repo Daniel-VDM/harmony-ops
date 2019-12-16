@@ -154,9 +154,6 @@ def fund_account(from_account_name, to_account_name, amount):
         print(f"{json.dumps(get_balance(args.endpoint_src, name=to_account_name), indent=4)}\n")
 
 
-# TODO: Staking test where you send Cx and Tx to and from delegator and validator. Txns from other validators,
-#       delegators, and regular transaction. Also make sure to do it before and after undelegation
-# TODO: Undelegation test and collect rewards test.
 @test
 def create_simple_validators(validator_count):
     """
@@ -261,12 +258,11 @@ def create_custom_validators():
 
     gopath = get_gopath()
     for val_address, key in main_repo_accs:
-        val_names = CLI.get_accounts(val_address)
+        val_names = list(filter(lambda s: s.startswith(ACC_NAME_PREFIX), CLI.get_accounts(val_address)))
         if not val_names:
             continue
-        val_name = list(filter(lambda s: s.startswith(ACC_NAME_PREFIX), val_names))[0]
-        if float(get_balance(endpoint, name=val_name)[0]["amount"]) < amount + 1:
-            fund_account(faucet_acc_name, val_name, amount + 1)  # +1 for gas overhead.
+        if float(get_balance(endpoint, name=val_names[0])[0]["amount"]) < amount + 1:
+            fund_account(faucet_acc_name, val_names[0], amount + 1)  # +1 for gas overhead.
         key_path = f"{gopath}/src/github.com/harmony-one/harmony/.hmy/{key}.key"
         assert os.path.isfile(key_path)
         rates = round(random.uniform(0, 1), 18), round(random.uniform(0, 1), 18)
@@ -303,7 +299,7 @@ def create_custom_validators():
             "max_change_rate": max_change_rate,
             "max_total_delegation": max_total_delegation,
             "min_self_delegation": 1,
-            "keystore_name": val_name,
+            "keystore_name": val_names[0],
         }
         if args.debug:
             print(f"Reference data for {val_address}: {json.dumps(ref_data, indent=4)}")
@@ -581,7 +577,7 @@ def create_single_validator_many_keys(bls_keys_count):
     rate, max_rate = min(rates), max(rates)
     max_change_rate = round(random.uniform(0, max_rate - 1e-9), 18)
     max_total_delegation = random.randint(amount + 1, 10)
-    bls_keys = [d for d in bls_generator(bls_keys_count, key_dir="/tmp/single_val_many_keys")]
+    bls_keys = [k for k in bls_generator(bls_keys_count, key_dir="/tmp/single_val_many_keys")]
     bls_key_string = ','.join(el["public-key"] for el in bls_keys)
     proc = CLI.expect_call(f"hmy --node={endpoint} staking create-validator "
                            f"--validator-addr {val_address} --name {val_name} "
@@ -747,6 +743,12 @@ def setup_newman_default(test_json, global_json, env_json):
             global_json["values"][i]["value"] = args.endpoint_exp
 
 
+# TODO: re-work the create / edit to include wait-to-confirm so that we reduce the explicit wait time.
+# TODO: rename validator and delegator address.
+# TODO: Staking test where you send Cx and Tx to and from delegator and validator. Txns from other validators,
+#       delegators, and regular transaction. Also make sure to do it before and after undelegation
+# TODO: Undelegation test and collect rewards test.
+# TODO: redo the commits so that everything looks nice for the PR.
 def staking_integration_test():
     print(f"{COLOR.UNDERLINE}{COLOR.BOLD}== Running staking integration test =={COLOR.ENDC}")
 
@@ -789,7 +791,7 @@ def staking_integration_test():
 
     # print(f"{COLOR.OKBLUE}Sleeping {args.txn_delay} seconds for finality...{COLOR.ENDC}")
     # time.sleep(args.txn_delay)
-    # collect_rewards(test_delegators)  # TODO: implement collect rewards test.
+    # clocal_return_values.append(ollect_rewards(test_delegators))  # TODO: implement collect rewards test.
     if all(local_return_values):
         print(f"\n{COLOR.OKGREEN}Passed{COLOR.ENDC} {COLOR.UNDERLINE}Staking Integration Test{COLOR.ENDC}\n")
         return True

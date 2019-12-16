@@ -1,4 +1,4 @@
-# Test API script.
+# API test script
 
 Related internal [gitbook](https://app.gitbook.com/@harmony-one/s/onboarding-wiki/developers/api-test-automation)
 
@@ -8,7 +8,7 @@ Related internal [gitbook](https://app.gitbook.com/@harmony-one/s/onboarding-wik
 - Make sure that you have `pyhmy` module for python3 [here](https://pypi.org/project/pyhmy/). You can install it with the following command `python3 -m install pyhmy`.
 - Make sure that you have `requests` module for python3 [here](https://pypi.org/project/requests/). You can install it with the following command `python3 -m install requests`.
 - Make sure that you have `jq` installed.
-- Make sure to have the CLI binary in this directory with the name `hmy` (or specify the binary path as an option).
+- Make sure to have the CLI binary in this directory with the name `hmy` or specify the binary path as an option.
 - Make sure the CLI version is v185-1b8eae8 or newer (can be checked with `./hmy version`). Note that this may require [building the latest](https://docs.harmony.one/home/command-line-interface/using-the-harmony-cli-tool/download-and-installation#compiling-from-source) CLI from the go-sdk repo.
 
 ## Setup
