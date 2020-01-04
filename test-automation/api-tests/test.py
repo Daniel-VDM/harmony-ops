@@ -16,6 +16,9 @@ ACC_NAMES_ADDED = []
 ACC_NAME_PREFIX = "_Test_key_"
 
 
+# TODO: update this to use the latest version of pyhmy -- should not take a very long time.
+# TODO: fix the dump of the setting JSON file...
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Python script to test the Harmony blockchain using the hmy CLI.')
     parser.add_argument("--test_dir", dest="test_dir", default="./tests/default",

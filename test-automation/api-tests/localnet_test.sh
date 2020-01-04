@@ -53,6 +53,8 @@ echo "Localnet booted..."
 echo "Sleeping ${wait} seconds to generate some funds..."
 sleep ${wait}
 
+# TODO: fix this to download the correct version of pyhmy (like a stable version)
+
 python3 -m pip install requests
 python3 -m pip install pyhmy
 
