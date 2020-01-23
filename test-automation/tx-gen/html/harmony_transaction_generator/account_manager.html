@@ -32,6 +32,7 @@ import json
 import datetime
 from multiprocessing.pool import ThreadPool
 
+import pexpect
 from pyhmy import cli
 from pyhmy.util import (
     json_load
@@ -50,6 +51,17 @@ _loaded_passphrase = {}  # keys = acc_names, values = passphrase
 
 
 # TODO: create a transaction plan object that will be called for any chained transaction...
+
+def process_passphrase(proc, passphrase):
+    &#34;&#34;&#34;
+    This takes a pexpect child program, `proc`, and enters the `passphrase` interactively.
+    &#34;&#34;&#34;
+    proc.expect(&#34;Enter passphrase:\r\n&#34;)
+    proc.sendline(passphrase)
+    proc.expect(&#34;Repeat the passphrase:\r\n&#34;)
+    proc.sendline(passphrase)
+    proc.expect(&#34;\n&#34;)
+
 
 def get_balances(account_name):
     &#34;&#34;&#34;
@@ -89,17 +101,18 @@ def load_accounts(keystore_path, passphrase, name_prefix=&#34;import&#34;, fast_
             # STRONG assumption about imported key-files.
             if file_name.endswith(&#34;.key&#34;) or not file_name.startswith(&#34;.&#34;):
                 file_path = f&#34;{keystore_path}/{file_name}&#34;
-                account_name = f&#34;{import_account_name_prefix}{name_prefix}{j+start}&#34;
+                account_name = f&#34;{import_account_name_prefix}{name_prefix}{j + start}&#34;
                 if not cli.get_address(account_name):
                     cli.remove_account(account_name)  # Just in-case there is a folder with nothing in it.
-                    Loggers.general.info(f&#34;Adding key file: ({j+start}) {file_name}&#34;)
+                    Loggers.general.info(f&#34;Adding key file: ({j + start}) {file_name}&#34;)
                     if fast_load:
                         keystore_acc_dir = f&#34;{cli.get_account_keystore_path()}/{account_name}&#34;
                         os.makedirs(keystore_acc_dir, exist_ok=True)
                         shutil.copy(file_path, f&#34;{keystore_acc_dir}/{file_name}&#34;)
                     else:
-                        cli.single_call(f&#34;hmy keys import-ks {file_path} {account_name} &#34;
-                                        f&#34;--passphrase={passphrase}&#34;)
+                        proc = cli.expect_call(f&#34;hmy keys import-ks {file_path} {account_name} --passphrase&#34;)
+                        process_passphrase(proc, passphrase)
+                        proc.expect(pexpect.EOF)
                 _loaded_passphrase[account_name] = passphrase
                 accounts_added.append(account_name)
                 _accounts_added.add(account_name)
@@ -191,27 +204,27 @@ def send_transaction(from_address, to_address, src_shard, dst_shard, amount,
     command = f&#34;hmy --node={config[&#39;ENDPOINTS&#39;][src_shard]} transfer &#34; \
               f&#34;--from={from_address} --to={to_address} &#34; \
               f&#34;--from-shard={src_shard} --to-shard={dst_shard} &#34; \
-              f&#34;--amount={amount} --passphrase={passphrase} --chain-id={config[&#39;CHAIN_ID&#39;]} &#34; \
-              f&#34;--gas-price {gas_price} --gas-limit {gas_limit} &#34;
+              f&#34;--amount={amount} --chain-id={config[&#39;CHAIN_ID&#39;]} &#34; \
+              f&#34;--gas-price {gas_price} --gas-limit {gas_limit} --passphrase &#34;
     if wait:
         command += f&#34;--wait-for-confirm {config[&#39;TXN_WAIT_TO_CONFIRM&#39;]} &#34;
     if nonce:
         command += f&#34;--nonce {nonce} &#34;
     info = {
-        &#39;from&#39;: from_address, &#39;to&#39;: to_address,
-        &#39;from-shard&#39;: src_shard, &#39;to-shard&#39;: dst_shard,
-        &#39;amount&#39;: amount, &#39;hash&#39;: None, &#39;send-time-utc&#39;: str(datetime.datetime.utcnow()),
-        &#39;txn-fee&#39;: round(gas_price * 1e-9 * gas_limit, 18), &#39;nonce&#39;: nonce, &#39;error&#39;: None
+        &#39;from&#39;: from_address, &#39;to&#39;: to_address, &#39;from-shard&#39;: src_shard,
+        &#39;to-shard&#39;: dst_shard, &#39;amount&#39;: amount, &#39;hash&#39;: None,
+        &#39;txn-fee&#39;: round(gas_price * 1e-9 * gas_limit, 18), &#39;nonce&#39;: nonce,
+        &#39;error&#39;: None, &#39;send-time-utc&#39;: None
     }
     while True:
         try:
-            response = cli.single_call(command, timeout=config[&#39;TXN_WAIT_TO_CONFIRM&#39;]).strip()
-            if wait:
-                info[&#39;hash&#39;] = json_load(response)[&#34;result&#34;][&#34;transactionHash&#34;]
-            else:
-                info[&#39;hash&#39;] = json_load(response)[&#34;transaction-receipt&#34;]
+            proc = cli.expect_call(command, timeout=config[&#39;TXN_WAIT_TO_CONFIRM&#39;])
+            process_passphrase(proc, passphrase)
+            response = json_load(proc.read().decode().strip())
+            info[&#39;hash&#39;] = response[&#34;transaction-receipt&#34;]
+            info[&#39;send-time-utc&#39;] = response[&#34;time-signed-utc&#34;]
             Loggers.transaction.info(json.dumps(info))
-            return info[&#39;hash&#39;]
+            return response[&#34;transaction-receipt&#34;]
         except (RuntimeError, json.JSONDecodeError) as e:
             if not retry or attempt_count &gt;= max_tries:
                 info[&#39;error&#39;] = str(e)
@@ -388,17 +401,18 @@ files to the CLI's keystore instead of using the "import-ks" command.</p>
             # STRONG assumption about imported key-files.
             if file_name.endswith(&#34;.key&#34;) or not file_name.startswith(&#34;.&#34;):
                 file_path = f&#34;{keystore_path}/{file_name}&#34;
-                account_name = f&#34;{import_account_name_prefix}{name_prefix}{j+start}&#34;
+                account_name = f&#34;{import_account_name_prefix}{name_prefix}{j + start}&#34;
                 if not cli.get_address(account_name):
                     cli.remove_account(account_name)  # Just in-case there is a folder with nothing in it.
-                    Loggers.general.info(f&#34;Adding key file: ({j+start}) {file_name}&#34;)
+                    Loggers.general.info(f&#34;Adding key file: ({j + start}) {file_name}&#34;)
                     if fast_load:
                         keystore_acc_dir = f&#34;{cli.get_account_keystore_path()}/{account_name}&#34;
                         os.makedirs(keystore_acc_dir, exist_ok=True)
                         shutil.copy(file_path, f&#34;{keystore_acc_dir}/{file_name}&#34;)
                     else:
-                        cli.single_call(f&#34;hmy keys import-ks {file_path} {account_name} &#34;
-                                        f&#34;--passphrase={passphrase}&#34;)
+                        proc = cli.expect_call(f&#34;hmy keys import-ks {file_path} {account_name} --passphrase&#34;)
+                        process_passphrase(proc, passphrase)
+                        proc.expect(pexpect.EOF)
                 _loaded_passphrase[account_name] = passphrase
                 accounts_added.append(account_name)
                 _accounts_added.add(account_name)
@@ -417,6 +431,26 @@ files to the CLI's keystore instead of using the "import-ks" command.</p>
     pool.close()
     pool.join()
     return accounts_added</code></pre>
+</details>
+</dd>
+<dt id="harmony_transaction_generator.account_manager.process_passphrase"><code class="name flex">
+<span>def <span class="ident">process_passphrase</span></span>(<span>proc, passphrase)</span>
+</code></dt>
+<dd>
+<section class="desc"><p>This takes a pexpect child program, <code>proc</code>, and enters the <code>passphrase</code> interactively.</p></section>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def process_passphrase(proc, passphrase):
+    &#34;&#34;&#34;
+    This takes a pexpect child program, `proc`, and enters the `passphrase` interactively.
+    &#34;&#34;&#34;
+    proc.expect(&#34;Enter passphrase:\r\n&#34;)
+    proc.sendline(passphrase)
+    proc.expect(&#34;Repeat the passphrase:\r\n&#34;)
+    proc.sendline(passphrase)
+    proc.expect(&#34;\n&#34;)</code></pre>
 </details>
 </dd>
 <dt id="harmony_transaction_generator.account_manager.remove_accounts"><code class="name flex">
@@ -551,27 +585,27 @@ if the transaction fails to send.</p>
     command = f&#34;hmy --node={config[&#39;ENDPOINTS&#39;][src_shard]} transfer &#34; \
               f&#34;--from={from_address} --to={to_address} &#34; \
               f&#34;--from-shard={src_shard} --to-shard={dst_shard} &#34; \
-              f&#34;--amount={amount} --passphrase={passphrase} --chain-id={config[&#39;CHAIN_ID&#39;]} &#34; \
-              f&#34;--gas-price {gas_price} --gas-limit {gas_limit} &#34;
+              f&#34;--amount={amount} --chain-id={config[&#39;CHAIN_ID&#39;]} &#34; \
+              f&#34;--gas-price {gas_price} --gas-limit {gas_limit} --passphrase &#34;
     if wait:
         command += f&#34;--wait-for-confirm {config[&#39;TXN_WAIT_TO_CONFIRM&#39;]} &#34;
     if nonce:
         command += f&#34;--nonce {nonce} &#34;
     info = {
-        &#39;from&#39;: from_address, &#39;to&#39;: to_address,
-        &#39;from-shard&#39;: src_shard, &#39;to-shard&#39;: dst_shard,
-        &#39;amount&#39;: amount, &#39;hash&#39;: None, &#39;send-time-utc&#39;: str(datetime.datetime.utcnow()),
-        &#39;txn-fee&#39;: round(gas_price * 1e-9 * gas_limit, 18), &#39;nonce&#39;: nonce, &#39;error&#39;: None
+        &#39;from&#39;: from_address, &#39;to&#39;: to_address, &#39;from-shard&#39;: src_shard,
+        &#39;to-shard&#39;: dst_shard, &#39;amount&#39;: amount, &#39;hash&#39;: None,
+        &#39;txn-fee&#39;: round(gas_price * 1e-9 * gas_limit, 18), &#39;nonce&#39;: nonce,
+        &#39;error&#39;: None, &#39;send-time-utc&#39;: None
     }
     while True:
         try:
-            response = cli.single_call(command, timeout=config[&#39;TXN_WAIT_TO_CONFIRM&#39;]).strip()
-            if wait:
-                info[&#39;hash&#39;] = json_load(response)[&#34;result&#34;][&#34;transactionHash&#34;]
-            else:
-                info[&#39;hash&#39;] = json_load(response)[&#34;transaction-receipt&#34;]
+            proc = cli.expect_call(command, timeout=config[&#39;TXN_WAIT_TO_CONFIRM&#39;])
+            process_passphrase(proc, passphrase)
+            response = json_load(proc.read().decode().strip())
+            info[&#39;hash&#39;] = response[&#34;transaction-receipt&#34;]
+            info[&#39;send-time-utc&#39;] = response[&#34;time-signed-utc&#34;]
             Loggers.transaction.info(json.dumps(info))
-            return info[&#39;hash&#39;]
+            return response[&#34;transaction-receipt&#34;]
         except (RuntimeError, json.JSONDecodeError) as e:
             if not retry or attempt_count &gt;= max_tries:
                 info[&#39;error&#39;] = str(e)
@@ -606,6 +640,7 @@ if the transaction fails to send.</p>
 <li><code><a title="harmony_transaction_generator.account_manager.get_balances" href="#harmony_transaction_generator.account_manager.get_balances">get_balances</a></code></li>
 <li><code><a title="harmony_transaction_generator.account_manager.get_passphrase" href="#harmony_transaction_generator.account_manager.get_passphrase">get_passphrase</a></code></li>
 <li><code><a title="harmony_transaction_generator.account_manager.load_accounts" href="#harmony_transaction_generator.account_manager.load_accounts">load_accounts</a></code></li>
+<li><code><a title="harmony_transaction_generator.account_manager.process_passphrase" href="#harmony_transaction_generator.account_manager.process_passphrase">process_passphrase</a></code></li>
 <li><code><a title="harmony_transaction_generator.account_manager.remove_accounts" href="#harmony_transaction_generator.account_manager.remove_accounts">remove_accounts</a></code></li>
 <li><code><a title="harmony_transaction_generator.account_manager.reset" href="#harmony_transaction_generator.account_manager.reset">reset</a></code></li>
 <li><code><a title="harmony_transaction_generator.account_manager.return_balances" href="#harmony_transaction_generator.account_manager.return_balances">return_balances</a></code></li>

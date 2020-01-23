@@ -6,6 +6,7 @@ import json
 import datetime
 from multiprocessing.pool import ThreadPool
 
+import pexpect
 from pyhmy import cli
 from pyhmy.util import (
     json_load
@@ -24,6 +25,17 @@ _loaded_passphrase = {}  # keys = acc_names, values = passphrase
 
 
 # TODO: create a transaction plan object that will be called for any chained transaction...
+
+def process_passphrase(proc, passphrase):
+    """
+    This takes a pexpect child program, `proc`, and enters the `passphrase` interactively.
+    """
+    proc.expect("Enter passphrase:\r\n")
+    proc.sendline(passphrase)
+    proc.expect("Repeat the passphrase:\r\n")
+    proc.sendline(passphrase)
+    proc.expect("\n")
+
 
 def get_balances(account_name):
     """
@@ -63,17 +75,18 @@ def load_accounts(keystore_path, passphrase, name_prefix="import", fast_load=Fal
             # STRONG assumption about imported key-files.
             if file_name.endswith(".key") or not file_name.startswith("."):
                 file_path = f"{keystore_path}/{file_name}"
-                account_name = f"{import_account_name_prefix}{name_prefix}{j+start}"
+                account_name = f"{import_account_name_prefix}{name_prefix}{j + start}"
                 if not cli.get_address(account_name):
                     cli.remove_account(account_name)  # Just in-case there is a folder with nothing in it.
-                    Loggers.general.info(f"Adding key file: ({j+start}) {file_name}")
+                    Loggers.general.info(f"Adding key file: ({j + start}) {file_name}")
                     if fast_load:
                         keystore_acc_dir = f"{cli.get_account_keystore_path()}/{account_name}"
                         os.makedirs(keystore_acc_dir, exist_ok=True)
                         shutil.copy(file_path, f"{keystore_acc_dir}/{file_name}")
                     else:
-                        cli.single_call(f"hmy keys import-ks {file_path} {account_name} "
-                                        f"--passphrase={passphrase}")
+                        proc = cli.expect_call(f"hmy keys import-ks {file_path} {account_name} --passphrase")
+                        process_passphrase(proc, passphrase)
+                        proc.expect(pexpect.EOF)
                 _loaded_passphrase[account_name] = passphrase
                 accounts_added.append(account_name)
                 _accounts_added.add(account_name)
@@ -165,27 +178,27 @@ def send_transaction(from_address, to_address, src_shard, dst_shard, amount,
     command = f"hmy --node={config['ENDPOINTS'][src_shard]} transfer " \
               f"--from={from_address} --to={to_address} " \
               f"--from-shard={src_shard} --to-shard={dst_shard} " \
-              f"--amount={amount} --passphrase={passphrase} --chain-id={config['CHAIN_ID']} " \
-              f"--gas-price {gas_price} --gas-limit {gas_limit} "
+              f"--amount={amount} --chain-id={config['CHAIN_ID']} " \
+              f"--gas-price {gas_price} --gas-limit {gas_limit} --passphrase "
     if wait:
         command += f"--wait-for-confirm {config['TXN_WAIT_TO_CONFIRM']} "
     if nonce:
         command += f"--nonce {nonce} "
     info = {
-        'from': from_address, 'to': to_address,
-        'from-shard': src_shard, 'to-shard': dst_shard,
-        'amount': amount, 'hash': None, 'send-time-utc': str(datetime.datetime.utcnow()),
-        'txn-fee': round(gas_price * 1e-9 * gas_limit, 18), 'nonce': nonce, 'error': None
+        'from': from_address, 'to': to_address, 'from-shard': src_shard,
+        'to-shard': dst_shard, 'amount': amount, 'hash': None,
+        'txn-fee': round(gas_price * 1e-9 * gas_limit, 18), 'nonce': nonce,
+        'error': None, 'send-time-utc': None
     }
     while True:
         try:
-            response = cli.single_call(command, timeout=config['TXN_WAIT_TO_CONFIRM']).strip()
-            if wait:
-                info['hash'] = json_load(response)["result"]["transactionHash"]
-            else:
-                info['hash'] = json_load(response)["transaction-receipt"]
+            proc = cli.expect_call(command, timeout=config['TXN_WAIT_TO_CONFIRM'])
+            process_passphrase(proc, passphrase)
+            response = json_load(proc.read().decode().strip())
+            info['hash'] = response["transaction-receipt"]
+            info['send-time-utc'] = response["time-signed-utc"]
             Loggers.transaction.info(json.dumps(info))
-            return info['hash']
+            return response["transaction-receipt"]
         except (RuntimeError, json.JSONDecodeError) as e:
             if not retry or attempt_count >= max_tries:
                 info['error'] = str(e)
@@ -240,4 +253,3 @@ def reset(safe=True):
     account_balances.clear()
     _accounts_added.clear()
     _loaded_passphrase.clear()
-
