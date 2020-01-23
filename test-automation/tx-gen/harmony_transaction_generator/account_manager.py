@@ -26,16 +26,6 @@ _loaded_passphrase = {}  # keys = acc_names, values = passphrase
 
 # TODO: create a transaction plan object that will be called for any chained transaction...
 
-def process_passphrase(proc, passphrase):
-    """
-    This takes a pexpect child program, `proc`, and enters the `passphrase` interactively.
-    """
-    proc.expect("Enter passphrase:\r\n")
-    proc.sendline(passphrase)
-    proc.expect("Repeat the passphrase:\r\n")
-    proc.sendline(passphrase)
-    proc.expect("\n")
-
 
 def get_balances(account_name):
     """
@@ -52,6 +42,17 @@ def get_balances(account_name):
     Loggers.balance.info(json.dumps(info))
     account_balances[account_name] = balances
     return balances
+
+
+def process_passphrase(proc, passphrase):
+    """
+    This takes a pexpect child program, `proc`, and enters the `passphrase` interactively.
+    """
+    proc.expect("Enter passphrase:\r\n")
+    proc.sendline(passphrase)
+    proc.expect("Repeat the passphrase:\r\n")
+    proc.sendline(passphrase)
+    proc.expect("\n")
 
 
 def load_accounts(keystore_path, passphrase, name_prefix="import", fast_load=False):
@@ -161,8 +162,8 @@ def remove_accounts(accounts, backup=False):
 
 
 def send_transaction(from_address, to_address, src_shard, dst_shard, amount,
-                     gas_price=1, gas_limit=21000, nonce=None, passphrase='', wait=True,
-                     retry=False, max_tries=5):
+                     gas_price=1, gas_limit=21000, nonce=None, passphrase='',
+                     wait=True, retry=False, max_tries=5):
     """
     This will send a single transaction `from_address` to `to_address` from shard `src_shard`
     to `dst_shard` for `amount` $ONE with a `gas_price` (default 1) at a `gas_limit` (default 21000)
@@ -186,9 +187,9 @@ def send_transaction(from_address, to_address, src_shard, dst_shard, amount,
         command += f"--nonce {nonce} "
     info = {
         'from': from_address, 'to': to_address, 'from-shard': src_shard,
-        'to-shard': dst_shard, 'amount': amount, 'hash': None,
+        'to-shard': dst_shard, 'amount': amount,
         'txn-fee': round(gas_price * 1e-9 * gas_limit, 18), 'nonce': nonce,
-        'error': None, 'send-time-utc': None
+        'send-time-utc': None, 'hash': None, 'error': None
     }
     while True:
         try:
