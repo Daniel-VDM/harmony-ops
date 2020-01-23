@@ -22,6 +22,7 @@ import sys
 import time
 import os
 import shutil
+import re
 from multiprocessing.pool import ThreadPool
 
 import pyhmy
@@ -41,6 +42,8 @@ def setup():
     env = cli.download("./bin/hmy", replace=False)
     cli.environment.update(env)
     cli.set_binary("./bin/hmy")
+    version_str = re.search('version v.*-', cli.get_version()).group(0).split('-')[0].replace("version v", "")
+    assert int(version_str) >= 236, "CLI binary is the wrong version."
     if os.path.exists(private_keys_dir):
         shutil.rmtree(private_keys_dir)
         os.makedirs(private_keys_dir)

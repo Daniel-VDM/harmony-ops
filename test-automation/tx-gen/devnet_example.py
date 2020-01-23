@@ -4,6 +4,7 @@ import time
 import sys
 import logging
 import datetime
+import re
 from multiprocessing.pool import ThreadPool
 
 import harmony_transaction_generator as tx_gen
@@ -54,6 +55,8 @@ def setup():
     env = cli.download("./bin/hmy", replace=False)
     cli.environment.update(env)
     cli.set_binary("./bin/hmy")
+    version_str = re.search('version v.*-', cli.get_version()).group(0).split('-')[0].replace("version v", "")
+    assert int(version_str) >= 236, "CLI binary is the wrong version."
 
 
 def log_writer(interval):
