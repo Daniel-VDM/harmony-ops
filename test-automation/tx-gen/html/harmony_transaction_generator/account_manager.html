@@ -52,16 +52,6 @@ _loaded_passphrase = {}  # keys = acc_names, values = passphrase
 
 # TODO: create a transaction plan object that will be called for any chained transaction...
 
-def process_passphrase(proc, passphrase):
-    &#34;&#34;&#34;
-    This takes a pexpect child program, `proc`, and enters the `passphrase` interactively.
-    &#34;&#34;&#34;
-    proc.expect(&#34;Enter passphrase:\r\n&#34;)
-    proc.sendline(passphrase)
-    proc.expect(&#34;Repeat the passphrase:\r\n&#34;)
-    proc.sendline(passphrase)
-    proc.expect(&#34;\n&#34;)
-
 
 def get_balances(account_name):
     &#34;&#34;&#34;
@@ -78,6 +68,17 @@ def get_balances(account_name):
     Loggers.balance.info(json.dumps(info))
     account_balances[account_name] = balances
     return balances
+
+
+def process_passphrase(proc, passphrase):
+    &#34;&#34;&#34;
+    This takes a pexpect child program, `proc`, and enters the `passphrase` interactively.
+    &#34;&#34;&#34;
+    proc.expect(&#34;Enter passphrase:\r\n&#34;)
+    proc.sendline(passphrase)
+    proc.expect(&#34;Repeat the passphrase:\r\n&#34;)
+    proc.sendline(passphrase)
+    proc.expect(&#34;\n&#34;)
 
 
 def load_accounts(keystore_path, passphrase, name_prefix=&#34;import&#34;, fast_load=False):
@@ -187,8 +188,8 @@ def remove_accounts(accounts, backup=False):
 
 
 def send_transaction(from_address, to_address, src_shard, dst_shard, amount,
-                     gas_price=1, gas_limit=21000, nonce=None, passphrase=&#39;&#39;, wait=True,
-                     retry=False, max_tries=5):
+                     gas_price=1, gas_limit=21000, nonce=None, passphrase=&#39;&#39;,
+                     wait=True, retry=False, max_tries=5):
     &#34;&#34;&#34;
     This will send a single transaction `from_address` to `to_address` from shard `src_shard`
     to `dst_shard` for `amount` $ONE with a `gas_price` (default 1) at a `gas_limit` (default 21000)
@@ -212,9 +213,9 @@ def send_transaction(from_address, to_address, src_shard, dst_shard, amount,
         command += f&#34;--nonce {nonce} &#34;
     info = {
         &#39;from&#39;: from_address, &#39;to&#39;: to_address, &#39;from-shard&#39;: src_shard,
-        &#39;to-shard&#39;: dst_shard, &#39;amount&#39;: amount, &#39;hash&#39;: None,
+        &#39;to-shard&#39;: dst_shard, &#39;amount&#39;: amount,
         &#39;txn-fee&#39;: round(gas_price * 1e-9 * gas_limit, 18), &#39;nonce&#39;: nonce,
-        &#39;error&#39;: None, &#39;send-time-utc&#39;: None
+        &#39;send-time-utc&#39;: None, &#39;hash&#39;: None, &#39;error&#39;: None
     }
     while True:
         try:
@@ -568,8 +569,8 @@ if the transaction fails to send.</p>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def send_transaction(from_address, to_address, src_shard, dst_shard, amount,
-                     gas_price=1, gas_limit=21000, nonce=None, passphrase=&#39;&#39;, wait=True,
-                     retry=False, max_tries=5):
+                     gas_price=1, gas_limit=21000, nonce=None, passphrase=&#39;&#39;,
+                     wait=True, retry=False, max_tries=5):
     &#34;&#34;&#34;
     This will send a single transaction `from_address` to `to_address` from shard `src_shard`
     to `dst_shard` for `amount` $ONE with a `gas_price` (default 1) at a `gas_limit` (default 21000)
@@ -593,9 +594,9 @@ if the transaction fails to send.</p>
         command += f&#34;--nonce {nonce} &#34;
     info = {
         &#39;from&#39;: from_address, &#39;to&#39;: to_address, &#39;from-shard&#39;: src_shard,
-        &#39;to-shard&#39;: dst_shard, &#39;amount&#39;: amount, &#39;hash&#39;: None,
+        &#39;to-shard&#39;: dst_shard, &#39;amount&#39;: amount,
         &#39;txn-fee&#39;: round(gas_price * 1e-9 * gas_limit, 18), &#39;nonce&#39;: nonce,
-        &#39;error&#39;: None, &#39;send-time-utc&#39;: None
+        &#39;send-time-utc&#39;: None, &#39;hash&#39;: None, &#39;error&#39;: None
     }
     while True:
         try:

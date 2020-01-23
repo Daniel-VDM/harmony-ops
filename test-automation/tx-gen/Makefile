@@ -6,6 +6,7 @@ help:
 	@echo "install - install the library locally"
 	@echo "test - run full test suite"
 	@echo "sdist - package"
+	@echo "docs - create html documentation"
 
 clean: clean-build clean-py
 

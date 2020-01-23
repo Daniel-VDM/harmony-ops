@@ -146,6 +146,6 @@ def set_config(input_config):
 
 def get_config():
     """
-    :returns a COPY of the current config (to prevent accidental modification of config)
+    This returns a COPY of the current config (to prevent accidental modification of config)
     """
     return _config.copy()
